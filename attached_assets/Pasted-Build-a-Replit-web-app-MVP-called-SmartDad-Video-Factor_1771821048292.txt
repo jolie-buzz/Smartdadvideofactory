@@ -1,0 +1,127 @@
+Build a Replit web app (MVP) called “SmartDad Video Factory” with a very simple workflow: SETUP (save assets) + ACTIVATE (repeatable production). Use Node.js + Express + SQLite + plain HTML/JS. Use Cloudflare R2 PRIVATE storage (S3 compatible). Use OpenAI for script generation, ElevenLabs for TTS (MP3 output), FFmpeg for dead-air removal + combining video/audio, and a background worker/queue so requests don’t time out.
+
+========================
+WHAT THE APP DOES (FLOW)
+========================
+1) SETUP (saved once, reusable):
+   - Upload product photo (jpg/png)
+   - Upload edited video (mp4; already edited and ready for voiceover)
+   - Persona / Instruction prompt textarea (detailed instructions used to generate scripts)
+   - Dead-air settings (TimeBolt-like):
+       threshold_db default -35
+       remove_silences_longer_than default 0.2 seconds
+       ignore_detections_shorter_than default 0.75 seconds
+   - Button: “Load ElevenLabs Voices” (fetch voices from user’s ElevenLabs “My Voices”)
+   - Dropdown: select voice_id from voices list
+   - Button: “Save Setup”
+   Result: stores photo+video in R2 (private) and stores persona/settings in SQLite. Show saved setups list.
+
+2) ACTIVATE (repeatable):
+   - Select a saved setup
+   - Button: “Activate”
+   Result: creates a job and runs pipeline in background. Show jobs list with status updates and final download.
+
+========================
+PIPELINE (BACKGROUND WORKER)
+========================
+When a job starts:
+A) Generate script via OpenAI using persona_prompt + product context (Taglish SmartDad tone).
+   Script should be plain text:
+   - 1 unskippable hook line
+   - 6–10 short easy-to-narrate lines
+   - 1 hard CTA line
+B) Generate voice via ElevenLabs using selected voice_id (from My Voices).
+   Output: voice_raw.mp3
+C) Auto dead-air cut using FFmpeg (TimeBolt-like):
+   Use silenceremove filter with threshold_db and duration rules.
+   - Use ignore_detections_shorter_than as the effective silence detection duration (default 0.75 so it ignores micro-pauses).
+   Output: voice_clean.mp3
+D) Combine video + voice_clean.mp3 into final.mp4 with FFmpeg:
+   - Keep video stream copy
+   - Encode audio to AAC
+   - Use -shortest
+   Output: final.mp4
+E) Upload outputs to R2 private:
+   jobs/{jobId}/voice_raw.mp3
+   jobs/{jobId}/voice_clean.mp3
+   jobs/{jobId}/final.mp4
+F) Update job status and logs.
+
+Job statuses must progress:
+queued → generating_script → generating_audio → cutting_dead_air → rendering → done/failed
+
+========================
+PRIVATE + SHARE TOGGLE
+========================
+R2 is PRIVATE. No public bucket.
+- Default is Private download: user clicks “Download” and app returns a short-lived signed URL.
+- Provide a toggle: “Sharable link”.
+  When enabled:
+   - generate share_token, store it, show “Copy share link”.
+   - Public route GET /s/:token must:
+       verify token not revoked
+       generate a short-lived signed URL for final.mp4
+       redirect user to that URL
+  When disabled:
+   - revoke the token (set share_revoked_at or share_enabled=0).
+
+========================
+TECH REQUIREMENTS
+========================
+- Use multer for uploads.
+- Use ffmpeg-static and ffprobe-static (do not rely on system ffmpeg).
+- Use @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner for R2 upload + signed URLs.
+- Use SQLite for DB (assets, settings, jobs).
+- Implement worker loop (poll queued jobs every 2–5 seconds).
+- Store only R2 object keys in DB (not public URLs).
+- Enforce file limits: typical video ~60 seconds; reject huge uploads with clear error.
+- Provide robust logs per job.
+
+========================
+ENV VARS (Replit Secrets)
+========================
+R2_ACCOUNT_ID
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_BUCKET
+SIGNED_URL_TTL_SECONDS
+
+(Optional; allow UI to input keys if not provided)
+OPENAI_API_KEY
+ELEVENLABS_API_KEY
+
+========================
+DATABASE SCHEMA
+========================
+assets:
+id, name, photo_key, video_key, persona_prompt, created_at
+
+settings:
+id, openai_key, elevenlabs_key, voice_id,
+threshold_db, remove_silences_longer_than, ignore_detections_shorter_than, created_at
+
+jobs:
+id, asset_id, status, script_text,
+audio_raw_key, audio_clean_key, final_video_key,
+share_enabled, share_token, share_revoked_at, logs, created_at
+
+========================
+API ROUTES
+========================
+POST /api/setup                      (save setup)
+GET  /api/assets                     (list setups)
+GET  /api/elevenlabs/voices          (list My Voices)
+POST /api/activate                   (create job)
+GET  /api/jobs                       (list jobs)
+GET  /api/jobs/:id/download          (signed url for final.mp4)
+POST /api/jobs/:id/share             (toggle share on/off)
+GET  /s/:token                       (public share redirect)
+
+========================
+DELIVERABLE
+========================
+Generate the full Replit project code ready to run:
+- server.js, db.js, r2.js, worker.js
+- /public/index.html and /public/app.js
+- package.json with dependencies
+Also include short “How to run” steps.

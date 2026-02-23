@@ -32,12 +32,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
 
   const voicesQuery = useQuery<Voice[]>({
     queryKey: ["/api/elevenlabs/voices"],
-    enabled: false,
   });
-
-  const loadVoices = () => {
-    voicesQuery.refetch();
-  };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -86,6 +81,13 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
   };
 
   const canSave = name && personaPrompt && photo && video && voiceId;
+
+  const missingFields = [];
+  if (!name) missingFields.push("Setup Name");
+  if (!photo) missingFields.push("Product Photo");
+  if (!video) missingFields.push("Edited Video");
+  if (!personaPrompt) missingFields.push("Persona Prompt");
+  if (!voiceId) missingFields.push("Voice");
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -173,9 +175,9 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             <div className="flex gap-2 items-end">
               <div className="flex-1 space-y-2">
                 <Label>ElevenLabs Voice</Label>
-                <Select value={voiceId} onValueChange={handleVoiceSelect} disabled={!voicesQuery.data?.length}>
+                <Select value={voiceId} onValueChange={handleVoiceSelect} disabled={voicesQuery.isLoading || !voicesQuery.data?.length}>
                   <SelectTrigger data-testid="select-voice">
-                    <SelectValue placeholder={voicesQuery.data?.length ? "Select a voice..." : "Load voices first"} />
+                    <SelectValue placeholder={voicesQuery.isLoading ? "Loading voices..." : voicesQuery.data?.length ? "Select a voice..." : "No voices available"} />
                   </SelectTrigger>
                   <SelectContent>
                     {voicesQuery.data?.map((v) => (
@@ -188,12 +190,13 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               </div>
               <Button
                 variant="secondary"
-                onClick={loadVoices}
+                onClick={() => voicesQuery.refetch()}
                 disabled={voicesQuery.isFetching}
                 data-testid="button-load-voices"
+                size="icon"
+                title="Refresh voices"
               >
                 {voicesQuery.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                <span className="ml-2">Load Voices</span>
               </Button>
             </div>
           </div>
@@ -253,6 +256,12 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               </div>
             </div>
           </div>
+
+          {!canSave && missingFields.length > 0 && (
+            <p className="text-sm text-destructive" data-testid="text-validation-hint">
+              Please fill in: {missingFields.join(", ")}
+            </p>
+          )}
 
           <Button
             className="w-full"

@@ -1,5 +1,5 @@
 import { storage } from "./storage";
-import { uploadToR2, downloadFromR2 } from "./r2";
+import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { spawn } from "child_process";
 import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
@@ -17,14 +17,8 @@ const openai = new OpenAI(
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
-async function generateScript(personaPrompt: string): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_completion_tokens: 8192,
-    messages: [
-      {
-        role: "system",
-        content: `You are a SmartDad video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
+async function generateScript(personaPrompt: string, photoUrl: string | null, model: string): Promise<string> {
+  const systemMessage = `You are a SmartDad video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
 
 Follow this exact format:
 - Line 1: An unskippable hook line (attention-grabbing, makes viewer stop scrolling)
@@ -35,19 +29,36 @@ Rules:
 - Keep each line short and punchy (max 15 words per line)
 - Use conversational Taglish tone
 - Output ONLY the script lines, one per line, no numbering, no labels
-- No stage directions or notes`,
-      },
-      {
-        role: "user",
-        content: personaPrompt,
-      },
+- No stage directions or notes
+- If a product image is provided, use the visible product details, branding, text, and features from the image to make the script accurate and specific`;
+
+  const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+  if (photoUrl) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: photoUrl },
+    });
+  }
+
+  userContent.push({
+    type: "text",
+    text: personaPrompt,
+  });
+
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: 8192,
+    messages: [
+      { role: "system", content: systemMessage },
+      { role: "user", content: userContent as any },
     ],
   });
 
   return response.choices[0]?.message?.content?.trim() || "";
 }
 
-async function generateVoice(scriptText: string, voiceId: string): Promise<Buffer> {
+async function generateVoice(scriptText: string, voiceId: string, elevenlabsModel: string): Promise<Buffer> {
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: "POST",
     headers: {
@@ -56,7 +67,7 @@ async function generateVoice(scriptText: string, voiceId: string): Promise<Buffe
     },
     body: JSON.stringify({
       text: scriptText,
-      model_id: "eleven_multilingual_v2",
+      model_id: elevenlabsModel,
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
@@ -152,9 +163,17 @@ async function processJob(jobId: number): Promise<void> {
 
   try {
     await storage.updateJob(jobId, { status: "generating_script" });
-    await storage.appendJobLog(jobId, "Generating script with OpenAI...");
+    await storage.appendJobLog(jobId, `Generating script with OpenAI (model: ${asset.openaiModel})...`);
 
-    const scriptText = await generateScript(asset.personaPrompt);
+    let photoUrl: string | null = null;
+    try {
+      photoUrl = await getSignedDownloadUrl(asset.photoKey);
+      await storage.appendJobLog(jobId, "Product photo included for vision analysis");
+    } catch (err: any) {
+      await storage.appendJobLog(jobId, `Warning: Could not get photo URL: ${err.message}`);
+    }
+
+    const scriptText = await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel);
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);
 
@@ -165,7 +184,7 @@ async function processJob(jobId: number): Promise<void> {
       throw new Error("No voice selected for this asset setup");
     }
 
-    const audioRawBuffer = await generateVoice(scriptText, asset.voiceId);
+    const audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel);
     const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
     await uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg");
     await storage.updateJob(jobId, { audioRawKey });

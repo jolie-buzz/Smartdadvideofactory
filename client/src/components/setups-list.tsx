@@ -1,14 +1,19 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2 } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain } from "lucide-react";
 import type { Asset } from "@shared/schema";
 
-export function SetupsList({ onActivate }: { onActivate: () => void }) {
+interface SetupsListProps {
+  onActivate: () => void;
+  onEdit: (asset: Asset) => void;
+}
+
+export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
   const { toast } = useToast();
 
   const assetsQuery = useQuery<Asset[]>({
@@ -113,6 +118,10 @@ export function SetupsList({ onActivate }: { onActivate: () => void }) {
                     <Film className="w-3 h-3" /> Video
                   </span>
                   <span className="flex items-center gap-1">
+                    <Brain className="w-3 h-3" />
+                    {asset.openaiModel || "gpt-4o"}
+                  </span>
+                  <span className="flex items-center gap-1">
                     <Settings className="w-3 h-3" />
                     {asset.thresholdDb}dB / {asset.ignoreDetectionsShorterThan}s
                   </span>
@@ -139,9 +148,19 @@ export function SetupsList({ onActivate }: { onActivate: () => void }) {
                 <Button
                   size="icon"
                   variant="secondary"
+                  onClick={() => onEdit(asset)}
+                  data-testid={`button-edit-${asset.id}`}
+                  title="Edit setup"
+                >
+                  <Pencil className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="secondary"
                   onClick={() => deleteMutation.mutate(asset.id)}
                   disabled={deleteMutation.isPending}
                   data-testid={`button-delete-${asset.id}`}
+                  title="Delete setup"
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>

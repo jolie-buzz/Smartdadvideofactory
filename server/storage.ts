@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
   createAsset(asset: InsertAsset): Promise<Asset>;
+  updateAsset(id: number, data: Partial<InsertAsset>): Promise<Asset | undefined>;
   getAssets(): Promise<Asset[]>;
   getAsset(id: number): Promise<Asset | undefined>;
   deleteAsset(id: number): Promise<void>;
@@ -18,6 +19,11 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   async createAsset(asset: InsertAsset): Promise<Asset> {
     const [result] = await db.insert(assets).values(asset).returning();
+    return result;
+  }
+
+  async updateAsset(id: number, data: Partial<InsertAsset>): Promise<Asset | undefined> {
+    const [result] = await db.update(assets).set(data).where(eq(assets.id, id)).returning();
     return result;
   }
 

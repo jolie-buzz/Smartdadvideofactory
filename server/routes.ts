@@ -68,7 +68,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
 
       if (!photoKey || !videoKey) {
         return res.status(400).json({ error: "Both photoKey and videoKey are required. Upload files first." });
@@ -81,6 +81,8 @@ export async function registerRoutes(
         personaPrompt: personaPrompt || "",
         voiceId: voiceId || null,
         voiceName: voiceName || null,
+        openaiModel: openaiModel || "gpt-4o",
+        elevenlabsModel: elevenlabsModel || "eleven_multilingual_v2",
         thresholdDb: typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb) || -35,
         removeSilencesLongerThan: typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan) || 0.2,
         ignoreDetectionsShorterThan: typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan) || 0.75,
@@ -107,6 +109,31 @@ export async function registerRoutes(
       const asset = await storage.getAsset(parseInt(req.params.id));
       if (!asset) return res.status(404).json({ error: "Asset not found" });
       res.json(asset);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/assets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const asset = await storage.getAsset(id);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
+      if (voiceId !== undefined) updateData.voiceId = voiceId;
+      if (voiceName !== undefined) updateData.voiceName = voiceName;
+      if (openaiModel !== undefined) updateData.openaiModel = openaiModel;
+      if (elevenlabsModel !== undefined) updateData.elevenlabsModel = elevenlabsModel;
+      if (thresholdDb !== undefined) updateData.thresholdDb = typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb);
+      if (removeSilencesLongerThan !== undefined) updateData.removeSilencesLongerThan = typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan);
+      if (ignoreDetectionsShorterThan !== undefined) updateData.ignoreDetectionsShorterThan = typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan);
+
+      const updated = await storage.updateAsset(id, updateData);
+      res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -152,6 +179,33 @@ export async function registerRoutes(
         category: v.category,
       }));
       res.json(voices);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/elevenlabs/models", async (_req, res) => {
+    try {
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: "ELEVENLABS_API_KEY not configured" });
+      }
+      const response = await fetch("https://api.elevenlabs.io/v1/models", {
+        headers: { "xi-api-key": apiKey },
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        return res.status(response.status).json({ error: `ElevenLabs API error: ${err}` });
+      }
+      const models = await response.json() as Array<{ model_id: string; name: string; description: string; can_do_text_to_speech: boolean }>;
+      const ttsModels = models
+        .filter((m) => m.can_do_text_to_speech)
+        .map((m) => ({
+          model_id: m.model_id,
+          name: m.name,
+          description: m.description,
+        }));
+      res.json(ttsModels);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

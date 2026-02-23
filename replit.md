@@ -36,15 +36,16 @@ shared/
 ```
 
 ### Pipeline Flow
-1. **Setup**: Upload photo + video to R2, save persona prompt + voice settings to DB
+1. **Setup**: Upload photo + video to R2 (separate requests to avoid 413), save persona prompt + voice/model settings to DB
 2. **Activate**: Create job, queue for background processing
 3. **Pipeline**:
-   - Generate script via OpenAI (Taglish SmartDad tone)
-   - Generate voice via ElevenLabs TTS
+   - Generate script via OpenAI with product photo (vision) + persona prompt (user-selectable model)
+   - Generate voice via ElevenLabs TTS (user-selectable model + voice)
    - Cut dead air via FFmpeg silenceremove filter
    - Combine video + cleaned audio via FFmpeg
    - Upload all outputs to R2
 4. **Download/Share**: Signed URLs for private downloads, token-based sharing
+5. **Edit**: Setups are editable (name, prompt, voice, models, dead-air settings)
 
 ### Environment Variables
 - `DATABASE_URL` - PostgreSQL connection
@@ -54,4 +55,5 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-23: Added photo vision for script generation, model selectors (OpenAI + ElevenLabs), editable setups, split file uploads with progress bar
 - 2026-02-23: Initial MVP build with full pipeline, setup management, job processing, and sharing

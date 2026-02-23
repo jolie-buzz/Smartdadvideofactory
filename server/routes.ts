@@ -1,14 +1,23 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadToR2, getSignedDownloadUrl } from "./r2";
+import { uploadFileToR2, getSignedDownloadUrl } from "./r2";
 import { startWorker } from "./worker";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
+import os from "os";
+import path from "path";
+import fs from "fs";
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, file, cb) => {
+      const uniqueName = `upload_${Date.now()}_${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`;
+      cb(null, uniqueName);
+    },
+  }),
   limits: {
     fileSize: 200 * 1024 * 1024,
   },
@@ -26,10 +35,14 @@ export async function registerRoutes(
       { name: "video", maxCount: 1 },
     ]),
     async (req, res) => {
+      const tempFiles: string[] = [];
       try {
         const files = req.files as { [fieldname: string]: Express.Multer.File[] };
         const photo = files?.photo?.[0];
         const video = files?.video?.[0];
+
+        if (photo?.path) tempFiles.push(photo.path);
+        if (video?.path) tempFiles.push(video.path);
 
         if (!photo || !video) {
           return res.status(400).json({ error: "Both photo and video files are required" });
@@ -49,8 +62,8 @@ export async function registerRoutes(
         const photoKey = `assets/${assetId}/photo.${photoExt}`;
         const videoKey = `assets/${assetId}/video.${videoExt}`;
 
-        await uploadToR2(photoKey, photo.buffer, photo.mimetype);
-        await uploadToR2(videoKey, video.buffer, video.mimetype);
+        await uploadFileToR2(photoKey, photo.path, photo.mimetype);
+        await uploadFileToR2(videoKey, video.path, video.mimetype);
 
         const name = req.body.name || "Untitled Setup";
         const personaPrompt = req.body.personaPrompt || "";
@@ -76,6 +89,10 @@ export async function registerRoutes(
       } catch (err: any) {
         console.error("Setup error:", err);
         res.status(500).json({ error: err.message || "Failed to save setup" });
+      } finally {
+        for (const tmpPath of tempFiles) {
+          try { fs.unlinkSync(tmpPath); } catch {}
+        }
       }
     }
   );

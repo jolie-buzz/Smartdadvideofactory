@@ -1,6 +1,8 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
+import fs from "fs";
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID!;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID!;
@@ -17,25 +19,24 @@ const s3 = new S3Client({
 });
 
 export async function uploadToR2(key: string, body: Buffer | Readable, contentType?: string): Promise<void> {
-  let bodyData: Buffer;
-  if (body instanceof Readable) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of body) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    bodyData = Buffer.concat(chunks);
-  } else {
-    bodyData = body;
-  }
-
-  await s3.send(
-    new PutObjectCommand({
+  const upload = new Upload({
+    client: s3,
+    params: {
       Bucket: R2_BUCKET,
       Key: key,
-      Body: bodyData,
+      Body: body,
       ContentType: contentType,
-    })
-  );
+    },
+    queueSize: 4,
+    partSize: 10 * 1024 * 1024,
+  });
+
+  await upload.done();
+}
+
+export async function uploadFileToR2(key: string, filePath: string, contentType?: string): Promise<void> {
+  const stream = fs.createReadStream(filePath);
+  await uploadToR2(key, stream, contentType);
 }
 
 export async function getSignedDownloadUrl(key: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface Voice {
@@ -19,6 +20,43 @@ interface Voice {
 }
 
 const MAX_FILE_SIZE_MB = 150;
+
+function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (percent: number) => void
+): Promise<{ ok: boolean; status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        onProgress(pct);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        body: xhr.responseText,
+      });
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error - please check your connection and try again."));
+    });
+
+    xhr.addEventListener("timeout", () => {
+      reject(new Error("Upload timed out. Please try again with a stable connection."));
+    });
+
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.send(formData);
+  });
+}
 
 export function SetupForm({ onComplete }: { onComplete: () => void }) {
   const { toast } = useToast();
@@ -31,62 +69,59 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
   const [thresholdDb, setThresholdDb] = useState(-35);
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const voicesQuery = useQuery<Voice[]>({
     queryKey: ["/api/elevenlabs/voices"],
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!photo || !video) throw new Error("Photo and video are required");
+  const handleSave = async () => {
+    if (!photo || !video) return;
 
-      const photoSizeMB = photo.size / 1024 / 1024;
-      const videoSizeMB = video.size / 1024 / 1024;
-      if (photoSizeMB > MAX_FILE_SIZE_MB) {
-        throw new Error(`Photo is too large (${photoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`);
-      }
-      if (videoSizeMB > MAX_FILE_SIZE_MB) {
-        throw new Error(`Video is too large (${videoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`);
-      }
+    const photoSizeMB = photo.size / 1024 / 1024;
+    const videoSizeMB = video.size / 1024 / 1024;
+    if (photoSizeMB > MAX_FILE_SIZE_MB) {
+      toast({ title: "Error", description: `Photo is too large (${photoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
+      return;
+    }
+    if (videoSizeMB > MAX_FILE_SIZE_MB) {
+      toast({ title: "Error", description: `Video is too large (${videoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
+      return;
+    }
 
-      const formData = new FormData();
-      formData.append("name", name);
-      formData.append("personaPrompt", personaPrompt);
-      formData.append("voiceId", voiceId);
-      formData.append("voiceName", voiceName);
-      formData.append("thresholdDb", String(thresholdDb));
-      formData.append("removeSilencesLongerThan", String(removeSilencesLongerThan));
-      formData.append("ignoreDetectionsShorterThan", String(ignoreDetectionsShorterThan));
-      formData.append("photo", photo);
-      formData.append("video", video);
+    const formData = new FormData();
+    formData.append("name", name);
+    formData.append("personaPrompt", personaPrompt);
+    formData.append("voiceId", voiceId);
+    formData.append("voiceName", voiceName);
+    formData.append("thresholdDb", String(thresholdDb));
+    formData.append("removeSilencesLongerThan", String(removeSilencesLongerThan));
+    formData.append("ignoreDetectionsShorterThan", String(ignoreDetectionsShorterThan));
+    formData.append("photo", photo);
+    formData.append("video", video);
 
-      let res: Response;
-      try {
-        res = await fetch("/api/setup", {
-          method: "POST",
-          body: formData,
-        });
-      } catch (networkErr) {
-        throw new Error("Network error - please check your connection and try again. Large files may take a while to upload.");
-      }
+    setIsUploading(true);
+    setUploadProgress(0);
 
-      if (!res.ok) {
-        let errorMessage = `Server error (${res.status})`;
+    try {
+      const result = await uploadWithProgress("/api/setup", formData, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      if (!result.ok) {
+        let errorMessage = `Server error (${result.status})`;
         try {
-          const errData = await res.json();
+          const errData = JSON.parse(result.body);
           errorMessage = errData.error || errorMessage;
         } catch {
-          try {
-            const text = await res.text();
-            if (text.length < 200) errorMessage = text;
-          } catch {}
+          if (result.body.length < 200) errorMessage = result.body;
         }
         throw new Error(errorMessage);
       }
 
-      return res.json();
-    },
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       toast({ title: "Setup saved", description: "Your setup has been saved successfully." });
       setName("");
@@ -95,12 +130,16 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
       setVideo(null);
       setVoiceId("");
       setVoiceName("");
+      if (photoInputRef.current) photoInputRef.current.value = "";
+      if (videoInputRef.current) videoInputRef.current.value = "";
       onComplete();
-    },
-    onError: (err: Error) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
-  });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to save setup", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
 
   const handleVoiceSelect = (id: string) => {
     setVoiceId(id);
@@ -151,6 +190,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               placeholder="e.g. SmartDad Promo v1"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              disabled={isUploading}
             />
           </div>
 
@@ -159,11 +199,13 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               <Label htmlFor="photo-upload">Product Photo</Label>
               <div className="relative">
                 <Input
+                  ref={photoInputRef}
                   id="photo-upload"
                   data-testid="input-photo"
                   type="file"
                   accept="image/*"
                   onChange={handlePhotoChange}
+                  disabled={isUploading}
                   className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
                 />
               </div>
@@ -178,11 +220,13 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             <div className="space-y-2">
               <Label htmlFor="video-upload">Edited Video</Label>
               <Input
+                ref={videoInputRef}
                 id="video-upload"
                 data-testid="input-video"
                 type="file"
                 accept="video/*"
                 onChange={handleVideoChange}
+                disabled={isUploading}
                 className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
               />
               {video && (
@@ -209,6 +253,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               value={personaPrompt}
               onChange={(e) => setPersonaPrompt(e.target.value)}
               rows={5}
+              disabled={isUploading}
             />
           </div>
 
@@ -222,7 +267,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             <div className="flex gap-2 items-end">
               <div className="flex-1 space-y-2">
                 <Label>ElevenLabs Voice</Label>
-                <Select value={voiceId} onValueChange={handleVoiceSelect} disabled={voicesQuery.isLoading || !voicesQuery.data?.length}>
+                <Select value={voiceId} onValueChange={handleVoiceSelect} disabled={isUploading || voicesQuery.isLoading || !voicesQuery.data?.length}>
                   <SelectTrigger data-testid="select-voice">
                     <SelectValue placeholder={voicesQuery.isLoading ? "Loading voices..." : voicesQuery.data?.length ? "Select a voice..." : "No voices available"} />
                   </SelectTrigger>
@@ -238,7 +283,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
               <Button
                 variant="secondary"
                 onClick={() => voicesQuery.refetch()}
-                disabled={voicesQuery.isFetching}
+                disabled={isUploading || voicesQuery.isFetching}
                 data-testid="button-load-voices"
                 size="icon"
                 title="Refresh voices"
@@ -269,6 +314,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                   min={-60}
                   max={-10}
                   step={1}
+                  disabled={isUploading}
                 />
               </div>
 
@@ -284,6 +330,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                   min={0.05}
                   max={2}
                   step={0.05}
+                  disabled={isUploading}
                 />
               </div>
 
@@ -299,30 +346,44 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                   min={0.1}
                   max={3}
                   step={0.05}
+                  disabled={isUploading}
                 />
               </div>
             </div>
           </div>
 
-          {!canSave && missingFields.length > 0 && (
+          {!canSave && !isUploading && missingFields.length > 0 && (
             <p className="text-sm text-destructive" data-testid="text-validation-hint">
               Please fill in: {missingFields.join(", ")}
             </p>
           )}
 
+          {isUploading && (
+            <div className="space-y-2" data-testid="upload-progress">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Uploading files...</span>
+                <span className="font-medium">{uploadProgress}%</span>
+              </div>
+              <Progress value={uploadProgress} className="h-3" />
+              {uploadProgress === 100 && (
+                <p className="text-xs text-muted-foreground">Processing on server...</p>
+              )}
+            </div>
+          )}
+
           <Button
             className="w-full"
             size="lg"
-            onClick={() => saveMutation.mutate()}
-            disabled={!canSave || saveMutation.isPending}
+            onClick={handleSave}
+            disabled={!canSave || isUploading}
             data-testid="button-save-setup"
           >
-            {saveMutation.isPending ? (
+            {isUploading ? (
               <Loader2 className="w-4 h-4 animate-spin mr-2" />
             ) : (
               <Save className="w-4 h-4 mr-2" />
             )}
-            {saveMutation.isPending ? "Uploading..." : "Save Setup"}
+            {isUploading ? `Uploading... ${uploadProgress}%` : "Save Setup"}
           </Button>
         </CardContent>
       </Card>

@@ -26,10 +26,6 @@ app.get("/health", (_req, res) => {
   res.status(200).send("ok");
 });
 
-app.get("/__healthcheck", (_req, res) => {
-  res.status(200).send("ok");
-});
-
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -67,6 +63,10 @@ app.use((req, res, next) => {
   next();
 });
 
+if (process.env.NODE_ENV === "production") {
+  serveStatic(app);
+}
+
 const port = parseInt(process.env.PORT || "5000", 10);
 httpServer.listen(
   {
@@ -95,9 +95,7 @@ httpServer.listen(
     return res.status(status).json({ message });
   });
 
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
+  if (process.env.NODE_ENV !== "production") {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }

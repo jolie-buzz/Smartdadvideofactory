@@ -6,7 +6,7 @@ import { createServer } from "http";
 const app = express();
 
 const httpServer = createServer((req, res) => {
-  if (req.url === "/" || req.url === "/health") {
+  if (req.url === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
     return;
@@ -18,6 +18,10 @@ declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
+}
+
+if (process.env.NODE_ENV === "production") {
+  serveStatic(app);
 }
 
 app.use(
@@ -88,9 +92,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
     return res.status(status).json({ message });
   });
 
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
+  if (process.env.NODE_ENV !== "production") {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }

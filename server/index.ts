@@ -12,6 +12,14 @@ declare module "http" {
   }
 }
 
+app.get("/", (_req, res) => {
+  res.status(200).send("ok");
+});
+
+app.get("/health", (_req, res) => {
+  res.status(200).send("ok");
+});
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -21,10 +29,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
-
-app.get("/health", (_req, res) => {
-  res.status(200).send("ok");
-});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -39,7 +43,7 @@ export function log(message: string, source = "express") {
 
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
+  const reqPath = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
   const originalResJson = res.json;
@@ -50,8 +54,8 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+    if (reqPath.startsWith("/api")) {
+      let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
@@ -62,10 +66,6 @@ app.use((req, res, next) => {
 
   next();
 });
-
-if (process.env.NODE_ENV === "production") {
-  serveStatic(app);
-}
 
 const port = parseInt(process.env.PORT || "5000", 10);
 httpServer.listen(
@@ -95,7 +95,9 @@ httpServer.listen(
     return res.status(status).json({ message });
   });
 
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }

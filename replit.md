@@ -55,5 +55,6 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-23: Added ElevenLabs enhance (speaker boost) toggle, delete buttons for setups and jobs
 - 2026-02-23: Added photo vision for script generation, model selectors (OpenAI + ElevenLabs), editable setups, split file uploads with progress bar
 - 2026-02-23: Initial MVP build with full pipeline, setup management, job processing, and sharing

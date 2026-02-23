@@ -13,6 +13,7 @@ export const assets = pgTable("assets", {
   voiceName: text("voice_name"),
   openaiModel: text("openai_model").notNull().default("gpt-4o"),
   elevenlabsModel: text("elevenlabs_model").notNull().default("eleven_multilingual_v2"),
+  useEnhance: boolean("use_enhance").notNull().default(true),
   thresholdDb: real("threshold_db").notNull().default(-35),
   removeSilencesLongerThan: real("remove_silences_longer_than").notNull().default(0.2),
   ignoreDetectionsShorterThan: real("ignore_detections_shorter_than").notNull().default(0.75),

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
@@ -107,6 +108,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [voiceName, setVoiceName] = useState("");
   const [openaiModel, setOpenaiModel] = useState("gpt-4o");
   const [elevenlabsModel, setElevenlabsModel] = useState("eleven_multilingual_v2");
+  const [useEnhance, setUseEnhance] = useState(true);
   const [thresholdDb, setThresholdDb] = useState(-35);
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
@@ -126,6 +128,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setVoiceName(editingAsset.voiceName || "");
       setOpenaiModel(editingAsset.openaiModel || "gpt-4o");
       setElevenlabsModel(editingAsset.elevenlabsModel || "eleven_multilingual_v2");
+      setUseEnhance(editingAsset.useEnhance !== undefined ? editingAsset.useEnhance : true);
       setThresholdDb(editingAsset.thresholdDb);
       setRemoveSilencesLongerThan(editingAsset.removeSilencesLongerThan);
       setIgnoreDetectionsShorterThan(editingAsset.ignoreDetectionsShorterThan);
@@ -150,7 +153,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel,
+            name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           }),
         });
@@ -200,7 +203,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, photoKey: photoResult.key, videoKey: videoResult.key,
-          personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel,
+          personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
         }),
       });
@@ -222,6 +225,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setVoiceName("");
       setOpenaiModel("gpt-4o");
       setElevenlabsModel("eleven_multilingual_v2");
+      setUseEnhance(true);
       if (photoInputRef.current) photoInputRef.current.value = "";
       if (videoInputRef.current) videoInputRef.current.value = "";
       onComplete();
@@ -438,6 +442,20 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 {voicesQuery.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               </Button>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between py-2">
+            <div className="space-y-0.5">
+              <Label htmlFor="enhance-toggle" className="text-sm font-medium">ElevenLabs Enhance</Label>
+              <p className="text-xs text-muted-foreground">Speaker boost for clearer, more professional audio</p>
+            </div>
+            <Switch
+              id="enhance-toggle"
+              data-testid="switch-enhance"
+              checked={useEnhance}
+              onCheckedChange={setUseEnhance}
+              disabled={isUploading}
+            />
           </div>
 
           <Separator />

@@ -58,7 +58,7 @@ Rules:
   return response.choices[0]?.message?.content?.trim() || "";
 }
 
-async function generateVoice(scriptText: string, voiceId: string, elevenlabsModel: string): Promise<Buffer> {
+async function generateVoice(scriptText: string, voiceId: string, elevenlabsModel: string, useEnhance: boolean): Promise<Buffer> {
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: "POST",
     headers: {
@@ -71,6 +71,7 @@ async function generateVoice(scriptText: string, voiceId: string, elevenlabsMode
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
+        use_speaker_boost: useEnhance,
       },
     }),
   });
@@ -184,7 +185,7 @@ async function processJob(jobId: number): Promise<void> {
       throw new Error("No voice selected for this asset setup");
     }
 
-    const audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel);
+    const audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance);
     const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
     await uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg");
     await storage.updateJob(jobId, { audioRawKey });

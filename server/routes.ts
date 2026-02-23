@@ -68,7 +68,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
 
       if (!photoKey || !videoKey) {
         return res.status(400).json({ error: "Both photoKey and videoKey are required. Upload files first." });
@@ -83,6 +83,7 @@ export async function registerRoutes(
         voiceName: voiceName || null,
         openaiModel: openaiModel || "gpt-4o",
         elevenlabsModel: elevenlabsModel || "eleven_multilingual_v2",
+        useEnhance: useEnhance !== undefined ? useEnhance : true,
         thresholdDb: typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb) || -35,
         removeSilencesLongerThan: typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan) || 0.2,
         ignoreDetectionsShorterThan: typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan) || 0.75,
@@ -120,7 +121,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
@@ -128,6 +129,7 @@ export async function registerRoutes(
       if (voiceName !== undefined) updateData.voiceName = voiceName;
       if (openaiModel !== undefined) updateData.openaiModel = openaiModel;
       if (elevenlabsModel !== undefined) updateData.elevenlabsModel = elevenlabsModel;
+      if (useEnhance !== undefined) updateData.useEnhance = useEnhance;
       if (thresholdDb !== undefined) updateData.thresholdDb = typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb);
       if (removeSilencesLongerThan !== undefined) updateData.removeSilencesLongerThan = typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan);
       if (ignoreDetectionsShorterThan !== undefined) updateData.ignoreDetectionsShorterThan = typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan);
@@ -246,6 +248,17 @@ export async function registerRoutes(
       const job = await storage.getJob(parseInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       res.json(job);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/jobs/:id", async (req, res) => {
+    try {
+      const job = await storage.getJob(parseInt(req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      await storage.deleteJob(job.id);
+      res.status(204).send();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

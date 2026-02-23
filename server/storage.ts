@@ -13,6 +13,7 @@ export interface IStorage {
   getJob(id: number): Promise<Job | undefined>;
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
   appendJobLog(id: number, message: string): Promise<void>;
+  deleteJob(id: number): Promise<void>;
   getJobByShareToken(token: string): Promise<Job | undefined>;
 }
 
@@ -73,6 +74,10 @@ export class DatabaseStorage implements IStorage {
     const timestamp = new Date().toISOString();
     const newLog = job.logs ? `${job.logs}\n[${timestamp}] ${message}` : `[${timestamp}] ${message}`;
     await db.update(jobs).set({ logs: newLog }).where(eq(jobs.id, id));
+  }
+
+  async deleteJob(id: number): Promise<void> {
+    await db.delete(jobs).where(eq(jobs.id, id));
   }
 
   async getJobByShareToken(token: string): Promise<Job | undefined> {

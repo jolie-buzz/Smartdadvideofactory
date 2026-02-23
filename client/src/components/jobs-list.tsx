@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronUp,
   Play,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -147,6 +148,19 @@ export function JobsList() {
     },
     onError: (err: Error) => {
       toast({ title: "Download Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteJobMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      await apiRequest("DELETE", `/api/jobs/${jobId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: "Deleted", description: "Job has been removed." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
 
@@ -279,6 +293,16 @@ export function JobsList() {
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </Button>
                   )}
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    onClick={() => deleteJobMutation.mutate(job.id)}
+                    disabled={deleteJobMutation.isPending || isActive}
+                    data-testid={`button-delete-job-${job.id}`}
+                    title={isActive ? "Cannot delete while processing" : "Delete job"}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
 

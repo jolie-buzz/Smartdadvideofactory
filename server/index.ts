@@ -67,17 +67,10 @@ app.use((req, res, next) => {
   next();
 });
 
-const port = parseInt(process.env.PORT || "5000", 10);
-httpServer.listen(
-  {
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  },
-  () => {
-    log(`serving on port ${port}`);
-  },
-);
+const PORT = Number(process.env.PORT) || 5000;
+httpServer.listen(PORT, "0.0.0.0", () => {
+  log(`serving on port ${PORT}`);
+});
 
 (async () => {
   await registerRoutes(httpServer, app);

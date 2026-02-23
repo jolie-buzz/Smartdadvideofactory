@@ -10,13 +10,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface Voice {
   voice_id: string;
   name: string;
   category: string;
 }
+
+const MAX_FILE_SIZE_MB = 150;
 
 export function SetupForm({ onComplete }: { onComplete: () => void }) {
   const { toast } = useToast();
@@ -36,6 +38,17 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (!photo || !video) throw new Error("Photo and video are required");
+
+      const photoSizeMB = photo.size / 1024 / 1024;
+      const videoSizeMB = video.size / 1024 / 1024;
+      if (photoSizeMB > MAX_FILE_SIZE_MB) {
+        throw new Error(`Photo is too large (${photoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`);
+      }
+      if (videoSizeMB > MAX_FILE_SIZE_MB) {
+        throw new Error(`Video is too large (${videoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`);
+      }
+
       const formData = new FormData();
       formData.append("name", name);
       formData.append("personaPrompt", personaPrompt);
@@ -44,18 +57,33 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
       formData.append("thresholdDb", String(thresholdDb));
       formData.append("removeSilencesLongerThan", String(removeSilencesLongerThan));
       formData.append("ignoreDetectionsShorterThan", String(ignoreDetectionsShorterThan));
-      if (photo) formData.append("photo", photo);
-      if (video) formData.append("video", video);
+      formData.append("photo", photo);
+      formData.append("video", video);
 
-      const res = await fetch("/api/setup", {
-        method: "POST",
-        body: formData,
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/setup", {
+          method: "POST",
+          body: formData,
+        });
+      } catch (networkErr) {
+        throw new Error("Network error - please check your connection and try again. Large files may take a while to upload.");
+      }
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Failed to save setup");
+        let errorMessage = `Server error (${res.status})`;
+        try {
+          const errData = await res.json();
+          errorMessage = errData.error || errorMessage;
+        } catch {
+          try {
+            const text = await res.text();
+            if (text.length < 200) errorMessage = text;
+          } catch {}
+        }
+        throw new Error(errorMessage);
       }
+
       return res.json();
     },
     onSuccess: () => {
@@ -80,6 +108,16 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
     setVoiceName(voice?.name || "");
   };
 
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setPhoto(file);
+  };
+
+  const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setVideo(file);
+  };
+
   const canSave = name && personaPrompt && photo && video && voiceId;
 
   const missingFields = [];
@@ -88,6 +126,9 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
   if (!video) missingFields.push("Edited Video");
   if (!personaPrompt) missingFields.push("Persona Prompt");
   if (!voiceId) missingFields.push("Voice");
+
+  const videoSizeMB = video ? video.size / 1024 / 1024 : 0;
+  const isLargeFile = videoSizeMB > 50;
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -121,8 +162,8 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                   id="photo-upload"
                   data-testid="input-photo"
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => setPhoto(e.target.files?.[0] || null)}
+                  accept="image/*"
+                  onChange={handlePhotoChange}
                   className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
                 />
               </div>
@@ -135,19 +176,25 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="video-upload">Edited Video (MP4)</Label>
+              <Label htmlFor="video-upload">Edited Video</Label>
               <Input
                 id="video-upload"
                 data-testid="input-video"
                 type="file"
-                accept="video/mp4,video/quicktime,video/avi,video/webm"
-                onChange={(e) => setVideo(e.target.files?.[0] || null)}
+                accept="video/*"
+                onChange={handleVideoChange}
                 className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
               />
               {video && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <Film className="w-3 h-3" />
-                  {video.name} ({(video.size / 1024 / 1024).toFixed(1)} MB)
+                  {video.name} ({videoSizeMB.toFixed(1)} MB)
+                </p>
+              )}
+              {isLargeFile && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Large file - upload may take a while on slow connections
                 </p>
               )}
             </div>
@@ -275,7 +322,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             ) : (
               <Save className="w-4 h-4 mr-2" />
             )}
-            Save Setup
+            {saveMutation.isPending ? "Uploading..." : "Save Setup"}
           </Button>
         </CardContent>
       </Card>

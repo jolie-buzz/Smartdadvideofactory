@@ -35,15 +35,15 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Both photo and video files are required" });
         }
 
-        const photoExt = photo.originalname.split(".").pop() || "jpg";
-        const videoExt = video.originalname.split(".").pop() || "mp4";
+        if (!photo.mimetype.startsWith("image/")) {
+          return res.status(400).json({ error: "Photo must be an image file (jpg, png, webp, heic, etc.)" });
+        }
+        if (!video.mimetype.startsWith("video/") && !video.mimetype.startsWith("application/octet-stream")) {
+          return res.status(400).json({ error: "Video must be a video file (mp4, mov, avi, webm, etc.)" });
+        }
 
-        if (!["jpg", "jpeg", "png", "webp"].includes(photoExt.toLowerCase())) {
-          return res.status(400).json({ error: "Photo must be jpg, png, or webp" });
-        }
-        if (!["mp4", "mov", "avi", "webm"].includes(videoExt.toLowerCase())) {
-          return res.status(400).json({ error: "Video must be mp4, mov, avi, or webm" });
-        }
+        const photoExt = photo.originalname.split(".").pop()?.toLowerCase() || "jpg";
+        const videoExt = video.originalname.split(".").pop()?.toLowerCase() || "mp4";
 
         const assetId = uuidv4();
         const photoKey = `assets/${assetId}/photo.${photoExt}`;

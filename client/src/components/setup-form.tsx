@@ -141,10 +141,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     queryKey: ["/api/elevenlabs/voices"],
   });
 
-  const elModelsQuery = useQuery<ElevenLabsModel[]>({
-    queryKey: ["/api/elevenlabs/models"],
-  });
-
   const handleSave = async () => {
     if (isEditing) {
       try {
@@ -389,19 +385,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
               <div className="space-y-2">
                 <Label>ElevenLabs TTS Model</Label>
-                <Select value={elevenlabsModel} onValueChange={setElevenlabsModel} disabled={isUploading || elModelsQuery.isLoading}>
+                <Select value={elevenlabsModel} onValueChange={setElevenlabsModel} disabled={isUploading}>
                   <SelectTrigger data-testid="select-elevenlabs-model">
-                    <SelectValue placeholder={elModelsQuery.isLoading ? "Loading models..." : "Select model..."} />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {elModelsQuery.data?.map((m) => (
-                      <SelectItem key={m.model_id} value={m.model_id}>
-                        {m.name}
-                      </SelectItem>
-                    ))}
-                    {!elModelsQuery.data?.length && !elModelsQuery.isLoading && (
-                      <SelectItem value="eleven_multilingual_v2">Eleven Multilingual v2</SelectItem>
-                    )}
+                    <SelectItem value="eleven_multilingual_v2">Eleven Multilingual v2</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

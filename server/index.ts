@@ -4,21 +4,21 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
-const httpServer = createServer(app);
+
+const httpServer = createServer((req, res) => {
+  if (req.url === "/" || req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+    return;
+  }
+  app(req, res);
+});
 
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
 }
-
-app.get("/", (_req, res) => {
-  res.status(200).send("ok");
-});
-
-app.get("/health", (_req, res) => {
-  res.status(200).send("ok");
-});
 
 app.use(
   express.json({

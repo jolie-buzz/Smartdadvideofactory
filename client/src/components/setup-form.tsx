@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 interface Voice {
   voice_id: string;
@@ -21,28 +21,44 @@ interface Voice {
 
 const MAX_FILE_SIZE_MB = 150;
 
-function uploadWithProgress(
-  url: string,
-  formData: FormData,
+function uploadFileWithProgress(
+  file: File,
+  type: "photo" | "video",
+  assetId: string,
   onProgress: (percent: number) => void
-): Promise<{ ok: boolean; status: number; body: string }> {
+): Promise<{ key: string; assetId: string }> {
   return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("type", type);
+    formData.append("assetId", assetId);
+
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", url);
+    xhr.open("POST", "/api/upload");
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
-        onProgress(pct);
+        onProgress(Math.round((e.loaded / e.total) * 100));
       }
     });
 
     xhr.addEventListener("load", () => {
-      resolve({
-        ok: xhr.status >= 200 && xhr.status < 300,
-        status: xhr.status,
-        body: xhr.responseText,
-      });
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("Invalid server response"));
+        }
+      } else {
+        let msg = `Upload failed (${xhr.status})`;
+        try {
+          const data = JSON.parse(xhr.responseText);
+          msg = data.error || msg;
+        } catch {
+          if (xhr.responseText.length < 200) msg = xhr.responseText;
+        }
+        reject(new Error(msg));
+      }
     });
 
     xhr.addEventListener("error", () => {
@@ -58,6 +74,8 @@ function uploadWithProgress(
   });
 }
 
+type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "saving" | "done";
+
 export function SetupForm({ onComplete }: { onComplete: () => void }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
@@ -69,10 +87,12 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
   const [thresholdDb, setThresholdDb] = useState(-35);
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
+  const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploading, setIsUploading] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  const isUploading = uploadStep !== "idle" && uploadStep !== "done";
 
   const voicesQuery = useQuery<Voice[]>({
     queryKey: ["/api/elevenlabs/voices"],
@@ -92,36 +112,44 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("name", name);
-    formData.append("personaPrompt", personaPrompt);
-    formData.append("voiceId", voiceId);
-    formData.append("voiceName", voiceName);
-    formData.append("thresholdDb", String(thresholdDb));
-    formData.append("removeSilencesLongerThan", String(removeSilencesLongerThan));
-    formData.append("ignoreDetectionsShorterThan", String(ignoreDetectionsShorterThan));
-    formData.append("photo", photo);
-    formData.append("video", video);
-
-    setIsUploading(true);
-    setUploadProgress(0);
+    const assetId = crypto.randomUUID();
 
     try {
-      const result = await uploadWithProgress("/api/setup", formData, (pct) => {
-        setUploadProgress(pct);
+      setUploadStep("uploading-photo");
+      setUploadProgress(0);
+      const photoResult = await uploadFileWithProgress(photo, "photo", assetId, setUploadProgress);
+
+      setUploadStep("uploading-video");
+      setUploadProgress(0);
+      const videoResult = await uploadFileWithProgress(video, "video", assetId, setUploadProgress);
+
+      setUploadStep("saving");
+      const res = await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          photoKey: photoResult.key,
+          videoKey: videoResult.key,
+          personaPrompt,
+          voiceId,
+          voiceName,
+          thresholdDb,
+          removeSilencesLongerThan,
+          ignoreDetectionsShorterThan,
+        }),
       });
 
-      if (!result.ok) {
-        let errorMessage = `Server error (${result.status})`;
+      if (!res.ok) {
+        let errorMessage = `Server error (${res.status})`;
         try {
-          const errData = JSON.parse(result.body);
+          const errData = await res.json();
           errorMessage = errData.error || errorMessage;
-        } catch {
-          if (result.body.length < 200) errorMessage = result.body;
-        }
+        } catch {}
         throw new Error(errorMessage);
       }
 
+      setUploadStep("done");
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       toast({ title: "Setup saved", description: "Your setup has been saved successfully." });
       setName("");
@@ -136,7 +164,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to save setup", variant: "destructive" });
     } finally {
-      setIsUploading(false);
+      setUploadStep("idle");
       setUploadProgress(0);
     }
   };
@@ -145,16 +173,6 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
     setVoiceId(id);
     const voice = voicesQuery.data?.find((v) => v.voice_id === id);
     setVoiceName(voice?.name || "");
-  };
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setPhoto(file);
-  };
-
-  const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setVideo(file);
   };
 
   const canSave = name && personaPrompt && photo && video && voiceId;
@@ -168,6 +186,14 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
 
   const videoSizeMB = video ? video.size / 1024 / 1024 : 0;
   const isLargeFile = videoSizeMB > 50;
+
+  const stepLabel = uploadStep === "uploading-photo"
+    ? "Uploading photo..."
+    : uploadStep === "uploading-video"
+    ? "Uploading video..."
+    : uploadStep === "saving"
+    ? "Saving setup..."
+    : "";
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -204,7 +230,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                   data-testid="input-photo"
                   type="file"
                   accept="image/*"
-                  onChange={handlePhotoChange}
+                  onChange={(e) => setPhoto(e.target.files?.[0] || null)}
                   disabled={isUploading}
                   className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
                 />
@@ -225,7 +251,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
                 data-testid="input-video"
                 type="file"
                 accept="video/*"
-                onChange={handleVideoChange}
+                onChange={(e) => setVideo(e.target.files?.[0] || null)}
                 disabled={isUploading}
                 className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
               />
@@ -359,15 +385,39 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
           )}
 
           {isUploading && (
-            <div className="space-y-2" data-testid="upload-progress">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Uploading files...</span>
-                <span className="font-medium">{uploadProgress}%</span>
+            <div className="space-y-3" data-testid="upload-progress">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm">
+                  {uploadStep === "uploading-photo" && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {(uploadStep === "uploading-video" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                  <span className={uploadStep === "uploading-photo" ? "font-medium" : "text-muted-foreground"}>
+                    Upload photo
+                  </span>
+                  {uploadStep === "uploading-photo" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
+                </div>
+                {uploadStep === "uploading-photo" && <Progress value={uploadProgress} className="h-2" />}
               </div>
-              <Progress value={uploadProgress} className="h-3" />
-              {uploadProgress === 100 && (
-                <p className="text-xs text-muted-foreground">Processing on server...</p>
-              )}
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm">
+                  {uploadStep === "uploading-video" && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {uploadStep === "saving" && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                  {uploadStep === "uploading-photo" && <span className="w-3 h-3" />}
+                  <span className={uploadStep === "uploading-video" ? "font-medium" : "text-muted-foreground"}>
+                    Upload video
+                  </span>
+                  {uploadStep === "uploading-video" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
+                </div>
+                {uploadStep === "uploading-video" && <Progress value={uploadProgress} className="h-2" />}
+              </div>
+
+              <div className="flex items-center gap-2 text-sm">
+                {uploadStep === "saving" && <Loader2 className="w-3 h-3 animate-spin" />}
+                {(uploadStep === "uploading-photo" || uploadStep === "uploading-video") && <span className="w-3 h-3" />}
+                <span className={uploadStep === "saving" ? "font-medium" : "text-muted-foreground"}>
+                  Save setup
+                </span>
+              </div>
             </div>
           )}
 
@@ -383,7 +433,7 @@ export function SetupForm({ onComplete }: { onComplete: () => void }) {
             ) : (
               <Save className="w-4 h-4 mr-2" />
             )}
-            {isUploading ? `Uploading... ${uploadProgress}%` : "Save Setup"}
+            {isUploading ? stepLabel : "Save Setup"}
           </Button>
         </CardContent>
       </Card>

@@ -29,73 +29,69 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   app.post(
-    "/api/setup",
-    upload.fields([
-      { name: "photo", maxCount: 1 },
-      { name: "video", maxCount: 1 },
-    ]),
+    "/api/upload",
+    upload.single("file"),
     async (req, res) => {
-      const tempFiles: string[] = [];
+      let tempPath: string | undefined;
       try {
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const photo = files?.photo?.[0];
-        const video = files?.video?.[0];
-
-        if (photo?.path) tempFiles.push(photo.path);
-        if (video?.path) tempFiles.push(video.path);
-
-        if (!photo || !video) {
-          return res.status(400).json({ error: "Both photo and video files are required" });
+        const file = req.file;
+        if (!file) {
+          return res.status(400).json({ error: "No file provided" });
         }
+        tempPath = file.path;
 
-        if (!photo.mimetype.startsWith("image/")) {
+        const fileType = req.body.type;
+        if (fileType === "photo" && !file.mimetype.startsWith("image/")) {
           return res.status(400).json({ error: "Photo must be an image file (jpg, png, webp, heic, etc.)" });
         }
-        if (!video.mimetype.startsWith("video/") && !video.mimetype.startsWith("application/octet-stream")) {
+        if (fileType === "video" && !file.mimetype.startsWith("video/") && !file.mimetype.startsWith("application/octet-stream")) {
           return res.status(400).json({ error: "Video must be a video file (mp4, mov, avi, webm, etc.)" });
         }
 
-        const photoExt = photo.originalname.split(".").pop()?.toLowerCase() || "jpg";
-        const videoExt = video.originalname.split(".").pop()?.toLowerCase() || "mp4";
+        const ext = file.originalname.split(".").pop()?.toLowerCase() || (fileType === "photo" ? "jpg" : "mp4");
+        const assetId = req.body.assetId || uuidv4();
+        const key = `assets/${assetId}/${fileType || "file"}.${ext}`;
 
-        const assetId = uuidv4();
-        const photoKey = `assets/${assetId}/photo.${photoExt}`;
-        const videoKey = `assets/${assetId}/video.${videoExt}`;
+        await uploadFileToR2(key, file.path, file.mimetype);
 
-        await uploadFileToR2(photoKey, photo.path, photo.mimetype);
-        await uploadFileToR2(videoKey, video.path, video.mimetype);
-
-        const name = req.body.name || "Untitled Setup";
-        const personaPrompt = req.body.personaPrompt || "";
-        const voiceId = req.body.voiceId || null;
-        const voiceName = req.body.voiceName || null;
-        const thresholdDb = parseFloat(req.body.thresholdDb) || -35;
-        const removeSilencesLongerThan = parseFloat(req.body.removeSilencesLongerThan) || 0.2;
-        const ignoreDetectionsShorterThan = parseFloat(req.body.ignoreDetectionsShorterThan) || 0.75;
-
-        const asset = await storage.createAsset({
-          name,
-          photoKey,
-          videoKey,
-          personaPrompt,
-          voiceId,
-          voiceName,
-          thresholdDb,
-          removeSilencesLongerThan,
-          ignoreDetectionsShorterThan,
-        });
-
-        res.status(201).json(asset);
+        res.json({ key, assetId });
       } catch (err: any) {
-        console.error("Setup error:", err);
-        res.status(500).json({ error: err.message || "Failed to save setup" });
+        console.error("Upload error:", err);
+        res.status(500).json({ error: err.message || "Failed to upload file" });
       } finally {
-        for (const tmpPath of tempFiles) {
-          try { fs.unlinkSync(tmpPath); } catch {}
+        if (tempPath) {
+          try { fs.unlinkSync(tempPath); } catch {}
         }
       }
     }
   );
+
+  app.post("/api/setup", async (req, res) => {
+    try {
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+
+      if (!photoKey || !videoKey) {
+        return res.status(400).json({ error: "Both photoKey and videoKey are required. Upload files first." });
+      }
+
+      const asset = await storage.createAsset({
+        name: name || "Untitled Setup",
+        photoKey,
+        videoKey,
+        personaPrompt: personaPrompt || "",
+        voiceId: voiceId || null,
+        voiceName: voiceName || null,
+        thresholdDb: typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb) || -35,
+        removeSilencesLongerThan: typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan) || 0.2,
+        ignoreDetectionsShorterThan: typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan) || 0.75,
+      });
+
+      res.status(201).json(asset);
+    } catch (err: any) {
+      console.error("Setup error:", err);
+      res.status(500).json({ error: err.message || "Failed to save setup" });
+    }
+  });
 
   app.get("/api/assets", async (_req, res) => {
     try {

@@ -39,12 +39,16 @@ export async function uploadFileToR2(key: string, filePath: string, contentType?
   await uploadToR2(key, stream, contentType);
 }
 
-export async function getSignedDownloadUrl(key: string): Promise<string> {
+export async function getSignedDownloadUrl(key: string, forceDownload?: string): Promise<string> {
   const ttl = parseInt(process.env.SIGNED_URL_TTL_SECONDS || "3600", 10);
-  const command = new GetObjectCommand({
+  const params: any = {
     Bucket: R2_BUCKET,
     Key: key,
-  });
+  };
+  if (forceDownload) {
+    params.ResponseContentDisposition = `attachment; filename="${forceDownload}"`;
+  }
+  const command = new GetObjectCommand(params);
   return getSignedUrl(s3, command, { expiresIn: ttl });
 }
 

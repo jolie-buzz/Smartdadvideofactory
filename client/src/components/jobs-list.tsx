@@ -144,7 +144,12 @@ export function JobsList() {
       return res.json();
     },
     onSuccess: (data: { url: string }) => {
-      window.open(data.url, "_blank");
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     },
     onError: (err: Error) => {
       toast({ title: "Download Error", description: err.message, variant: "destructive" });

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadFileToR2, getSignedDownloadUrl } from "./r2";
+import { uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors } from "./r2";
 import { startWorker } from "./worker";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
@@ -27,6 +27,24 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  configureR2Cors().catch(() => {});
+
+  app.post("/api/upload-url", async (req, res) => {
+    try {
+      const { type, assetId, filename, contentType } = req.body;
+      if (!type || !assetId || !filename || !contentType) {
+        return res.status(400).json({ error: "type, assetId, filename, and contentType are required" });
+      }
+      const ext = filename.split(".").pop()?.toLowerCase() || (type === "photo" ? "jpg" : "mp4");
+      const key = `assets/${assetId}/${type}.${ext}`;
+      const url = await getSignedUploadUrl(key, contentType);
+      res.json({ url, key });
+    } catch (err: any) {
+      console.error("Presigned URL error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate upload URL" });
+    }
+  });
 
   app.post(
     "/api/upload",

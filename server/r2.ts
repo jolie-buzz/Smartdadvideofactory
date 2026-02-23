@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, PutBucketCorsCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
@@ -46,6 +46,39 @@ export async function getSignedDownloadUrl(key: string): Promise<string> {
     Key: key,
   });
   return getSignedUrl(s3, command, { expiresIn: ttl });
+}
+
+export async function getSignedUploadUrl(key: string, contentType: string): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+  return getSignedUrl(s3, command, { expiresIn: 3600 });
+}
+
+export async function configureR2Cors(): Promise<void> {
+  try {
+    await s3.send(
+      new PutBucketCorsCommand({
+        Bucket: R2_BUCKET,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: ["*"],
+              AllowedMethods: ["PUT", "GET"],
+              AllowedHeaders: ["*"],
+              ExposeHeaders: ["ETag"],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      })
+    );
+    console.log("[r2] CORS configured for direct uploads");
+  } catch (err: any) {
+    console.warn("[r2] Could not set CORS (may already be configured):", err.message);
+  }
 }
 
 export async function downloadFromR2(key: string): Promise<Buffer> {

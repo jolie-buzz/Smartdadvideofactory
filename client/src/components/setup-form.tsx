@@ -37,20 +37,34 @@ const OPENAI_MODELS = [
   { id: "gpt-4.1-nano", name: "GPT-4.1 Nano (fastest)" },
 ];
 
-function uploadFileWithProgress(
+async function uploadFileWithProgress(
   file: File,
   type: "photo" | "video",
   assetId: string,
   onProgress: (percent: number) => void
 ): Promise<{ key: string; assetId: string }> {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("type", type);
-    formData.append("assetId", assetId);
+  const res = await fetch("/api/upload-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type,
+      assetId,
+      filename: file.name,
+      contentType: file.type || (type === "photo" ? "image/jpeg" : "video/mp4"),
+    }),
+  });
 
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to get upload URL (${res.status})`);
+  }
+
+  const { url, key } = await res.json();
+
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/upload");
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", file.type || (type === "photo" ? "image/jpeg" : "video/mp4"));
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
@@ -60,20 +74,9 @@ function uploadFileWithProgress(
 
     xhr.addEventListener("load", () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch {
-          reject(new Error("Invalid server response"));
-        }
+        resolve({ key, assetId });
       } else {
-        let msg = `Upload failed (${xhr.status})`;
-        try {
-          const data = JSON.parse(xhr.responseText);
-          msg = data.error || msg;
-        } catch {
-          if (xhr.responseText.length < 200) msg = xhr.responseText;
-        }
-        reject(new Error(msg));
+        reject(new Error(`Upload failed (${xhr.status})`));
       }
     });
 
@@ -86,7 +89,7 @@ function uploadFileWithProgress(
     });
 
     xhr.timeout = 10 * 60 * 1000;
-    xhr.send(formData);
+    xhr.send(file);
   });
 }
 

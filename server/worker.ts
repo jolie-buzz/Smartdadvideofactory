@@ -276,15 +276,17 @@ async function overlayHookHeadline(
   workDir: string
 ): Promise<Buffer> {
   const videoPath = join(workDir, "video_for_hook.mp4");
+  const textPath = join(workDir, "hook_headline.txt");
   const outputPath = join(workDir, "video_hooked.mp4");
 
   await writeFile(videoPath, videoBuffer);
+  await writeFile(textPath, headline, "utf-8");
 
-  const escapedHeadline = headline.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+  const escapedTextPath = textPath.replace(/\\/g, "/").replace(/:/g, "\\:");
 
   await runFfmpeg([
     "-i", videoPath,
-    "-vf", `drawtext=text='${escapedHeadline}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2`,
+    "-vf", `drawtext=textfile='${escapedTextPath}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:font=FreeSans`,
     "-c:a", "copy",
     "-y",
     outputPath,

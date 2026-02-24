@@ -278,6 +278,10 @@ async function overlayHookHeadline(
 ): Promise<Buffer> {
   const videoPath = join(workDir, "video_for_hook.mp4");
   const textPath = join(workDir, "hook_headline.txt");
+  const headPath = join(workDir, "hook_head.mp4");
+  const headTextPath = join(workDir, "hook_head_text.mp4");
+  const tailPath = join(workDir, "hook_tail.mp4");
+  const concatListPath = join(workDir, "hook_concat.txt");
   const outputPath = join(workDir, "video_hooked.mp4");
 
   await writeFile(videoPath, videoBuffer);
@@ -316,16 +320,65 @@ async function overlayHookHeadline(
       break;
   }
 
-  await runFfmpeg([
-    "-i", videoPath,
-    "-vf", `drawtext=${effectParams}`,
-    "-preset", "ultrafast",
-    "-c:a", "copy",
-    "-y",
-    outputPath,
-  ], 600_000);
+  const HOOK_DURATION = 5;
 
-  return readFile(outputPath);
+  try {
+    await runFfmpeg([
+      "-i", videoPath,
+      "-t", String(HOOK_DURATION),
+      "-c", "copy",
+      "-y",
+      headPath,
+    ], 60_000);
+
+    await runFfmpeg([
+      "-i", headPath,
+      "-vf", `drawtext=${effectParams}`,
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-crf", "18",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
+      "-y",
+      headTextPath,
+    ], 180_000);
+
+    await runFfmpeg([
+      "-i", videoPath,
+      "-ss", String(HOOK_DURATION),
+      "-c", "copy",
+      "-y",
+      tailPath,
+    ], 60_000);
+
+    await writeFile(concatListPath, `file '${headTextPath}'\nfile '${tailPath}'\n`);
+
+    await runFfmpeg([
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatListPath,
+      "-c", "copy",
+      "-movflags", "+faststart",
+      "-y",
+      outputPath,
+    ], 120_000);
+
+    return readFile(outputPath);
+  } catch (splitErr: any) {
+    console.warn(`[worker] Split overlay failed (${splitErr.message}), falling back to full re-encode...`);
+    await runFfmpeg([
+      "-i", videoPath,
+      "-vf", `drawtext=${effectParams}`,
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
+      "-y",
+      outputPath,
+    ], 600_000);
+    return readFile(outputPath);
+  }
 }
 
 async function processJob(jobId: number): Promise<void> {

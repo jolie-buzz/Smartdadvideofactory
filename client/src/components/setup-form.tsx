@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2 } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { Asset } from "@shared/schema";
 
@@ -28,6 +29,15 @@ interface ElevenLabsModel {
   description: string;
 }
 
+interface PendingShot {
+  id: string;
+  r2Key: string;
+  category: string;
+  shotType: string | null;
+  durationSec: number;
+  filename: string;
+}
+
 const MAX_FILE_SIZE_MB = 150;
 
 const OPENAI_MODELS = [
@@ -37,6 +47,18 @@ const OPENAI_MODELS = [
   { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
   { id: "gpt-4.1-nano", name: "GPT-4.1 Nano (fastest)" },
 ];
+
+const CATEGORIES = ["HOOK", "PROBLEM", "SOLUTION", "HIGHLIGHT", "BODY", "CTA"] as const;
+const SHOT_TYPES = ["demo", "aesthetic", "feature", "top", "side", "pov", "closeup", "before_after"] as const;
+
+const CATEGORY_COLORS: Record<string, string> = {
+  HOOK: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  PROBLEM: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+  SOLUTION: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  HIGHLIGHT: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  BODY: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  CTA: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+};
 
 async function uploadFileWithProgress(
   file: File,
@@ -130,6 +152,16 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const videoInputRef = useRef<HTMLInputElement>(null);
   const musicInputRef = useRef<HTMLInputElement>(null);
 
+  const [tempAssetId] = useState(() => crypto.randomUUID());
+  const [pendingShots, setPendingShots] = useState<PendingShot[]>([]);
+  const [shotFile, setShotFile] = useState<File | null>(null);
+  const [shotCategory, setShotCategory] = useState<string>("BODY");
+  const [shotType, setShotType] = useState<string>("");
+  const [shotDuration, setShotDuration] = useState<string>("6");
+  const [shotUploading, setShotUploading] = useState(false);
+  const [shotUploadProgress, setShotUploadProgress] = useState(0);
+  const shotInputRef = useRef<HTMLInputElement>(null);
+
   const isEditing = !!editingAsset;
   const isUploading = uploadStep !== "idle" && uploadStep !== "done";
 
@@ -165,6 +197,72 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     queryKey: ["/api/elevenlabs/models"],
   });
 
+  const handleUploadShot = async () => {
+    if (!shotFile) return;
+
+    setShotUploading(true);
+    setShotUploadProgress(0);
+
+    try {
+      const defaultMime = "video/mp4";
+      const presignRes = await fetch("/api/upload-shot-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assetId: tempAssetId,
+          filename: shotFile.name,
+          contentType: shotFile.type || defaultMime,
+        }),
+      });
+
+      if (!presignRes.ok) {
+        const err = await presignRes.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to get upload URL");
+      }
+
+      const { url, key } = await presignRes.json();
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url);
+        xhr.setRequestHeader("Content-Type", shotFile.type || defaultMime);
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) setShotUploadProgress(Math.round((e.loaded / e.total) * 100));
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed (${xhr.status})`));
+        });
+        xhr.addEventListener("error", () => reject(new Error("Network error")));
+        xhr.timeout = 10 * 60 * 1000;
+        xhr.send(shotFile);
+      });
+
+      const newShot: PendingShot = {
+        id: crypto.randomUUID(),
+        r2Key: key,
+        category: shotCategory,
+        shotType: shotType && shotType !== "none" ? shotType : null,
+        durationSec: parseFloat(shotDuration),
+        filename: shotFile.name,
+      };
+
+      setPendingShots((prev) => [...prev, newShot]);
+      toast({ title: "Shot uploaded", description: `${shotFile.name} added to shot library.` });
+      setShotFile(null);
+      if (shotInputRef.current) shotInputRef.current.value = "";
+    } catch (err: any) {
+      toast({ title: "Upload error", description: err.message, variant: "destructive" });
+    } finally {
+      setShotUploading(false);
+      setShotUploadProgress(0);
+    }
+  };
+
+  const handleDeletePendingShot = (shotId: string) => {
+    setPendingShots((prev) => prev.filter((s) => s.id !== shotId));
+  };
+
   const handleSave = async () => {
     if (isEditing) {
       try {
@@ -196,6 +294,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
     if (!photo) return;
     if (videoSource === "edited" && !video) return;
+    if (videoSource === "builder" && pendingShots.length === 0) return;
 
     const photoSizeMB = photo.size / 1024 / 1024;
     if (photoSizeMB > MAX_FILE_SIZE_MB) {
@@ -210,25 +309,23 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       }
     }
 
-    const assetId = crypto.randomUUID();
-
     try {
       setUploadStep("uploading-photo");
       setUploadProgress(0);
-      const photoResult = await uploadFileWithProgress(photo, "photo", assetId, setUploadProgress);
+      const photoResult = await uploadFileWithProgress(photo, "photo", tempAssetId, setUploadProgress);
 
       let videoResult: { key: string; assetId: string } | null = null;
       if (video && videoSource === "edited") {
         setUploadStep("uploading-video");
         setUploadProgress(0);
-        videoResult = await uploadFileWithProgress(video, "video", assetId, setUploadProgress);
+        videoResult = await uploadFileWithProgress(video, "video", tempAssetId, setUploadProgress);
       }
 
       let musicKeyValue: string | null = null;
       if (music) {
         setUploadStep("uploading-music");
         setUploadProgress(0);
-        const musicResult = await uploadFileWithProgress(music, "music", assetId, setUploadProgress);
+        const musicResult = await uploadFileWithProgress(music, "music", tempAssetId, setUploadProgress);
         musicKeyValue = musicResult.key;
       }
 
@@ -251,6 +348,25 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         throw new Error(errorMessage);
       }
 
+      const createdAsset = await res.json();
+
+      if (videoSource === "builder" && pendingShots.length > 0) {
+        for (const shot of pendingShots) {
+          await fetch(`/api/assets/${createdAsset.id}/shots`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: shot.category,
+              shotType: shot.shotType,
+              durationSec: shot.durationSec,
+              r2Key: shot.r2Key,
+              orientation: "portrait",
+              filename: shot.filename,
+            }),
+          });
+        }
+      }
+
       setUploadStep("done");
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       toast({ title: "Setup saved", description: "Your setup has been saved successfully." });
@@ -269,6 +385,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setAutoCaptions(false);
       setHookHeadline(false);
       setHookPrompt("");
+      setPendingShots([]);
       if (photoInputRef.current) photoInputRef.current.value = "";
       if (videoInputRef.current) videoInputRef.current.value = "";
       if (musicInputRef.current) musicInputRef.current.value = "";
@@ -289,12 +406,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const canSave = isEditing
     ? name && personaPrompt && voiceId
-    : name && personaPrompt && photo && (videoSource === "builder" || video) && voiceId;
+    : name && personaPrompt && photo && (videoSource === "builder" ? pendingShots.length > 0 : !!video) && voiceId;
 
   const missingFields = [];
   if (!name) missingFields.push("Setup Name");
   if (!isEditing && !photo) missingFields.push("Product Photo");
   if (!isEditing && videoSource === "edited" && !video) missingFields.push("Edited Video");
+  if (!isEditing && videoSource === "builder" && pendingShots.length === 0) missingFields.push("At least 1 shot clip");
   if (!personaPrompt) missingFields.push("Persona Prompt");
   if (!voiceId) missingFields.push("Voice");
 
@@ -310,6 +428,11 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     : uploadStep === "saving"
     ? "Saving..."
     : "";
+
+  const shotCounts: Record<string, number> = {};
+  for (const s of pendingShots) {
+    shotCounts[s.category] = (shotCounts[s.category] || 0) + 1;
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -386,7 +509,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 <p className="text-xs text-muted-foreground">
                   {videoSource === "edited"
                     ? "Upload an already-edited video to use as the base."
-                    : "Build a video from shot clips after creating the setup. Use the Video Builder tab on your setup."}
+                    : "Upload shot clips below. When you activate, a video will be auto-built from your clips and sent to the AI pipeline."}
                 </p>
               </div>
 
@@ -414,6 +537,138 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                       <AlertTriangle className="w-3 h-3" />
                       Large file - upload may take a while on slow connections
                     </p>
+                  )}
+                </div>
+              )}
+
+              {videoSource === "builder" && (
+                <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <Clapperboard className="w-4 h-4" />
+                    <h4 className="text-sm font-medium">Shot Library</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Upload 9:16 vertical clips tagged by category. Need at least 1 HOOK and 4 BODY shots with different types.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Video Clip</Label>
+                      <Input
+                        ref={shotInputRef}
+                        data-testid="input-shot-file"
+                        type="file"
+                        accept="video/*"
+                        onChange={(e) => setShotFile(e.target.files?.[0] || null)}
+                        disabled={shotUploading || isUploading}
+                        className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-xs text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Category</Label>
+                      <Select value={shotCategory} onValueChange={setShotCategory} disabled={shotUploading || isUploading}>
+                        <SelectTrigger data-testid="select-shot-category" className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CATEGORIES.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Shot Type {shotCategory === "BODY" ? "(required)" : "(optional)"}</Label>
+                      <Select value={shotType} onValueChange={setShotType} disabled={shotUploading || isUploading}>
+                        <SelectTrigger data-testid="select-shot-type" className="h-9">
+                          <SelectValue placeholder="Select type..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {SHOT_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Duration (sec)</Label>
+                      <Input
+                        data-testid="input-shot-duration"
+                        type="number"
+                        value={shotDuration}
+                        onChange={(e) => setShotDuration(e.target.value)}
+                        min="1"
+                        max="30"
+                        step="0.5"
+                        disabled={shotUploading || isUploading}
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+
+                  {shotUploading && (
+                    <div className="space-y-1">
+                      <Progress value={shotUploadProgress} className="h-2" />
+                      <p className="text-xs text-muted-foreground">Uploading clip... {shotUploadProgress}%</p>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={handleUploadShot}
+                    disabled={!shotFile || shotUploading || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none"))}
+                    data-testid="button-upload-shot"
+                    size="sm"
+                    className="w-full"
+                  >
+                    {shotUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
+                    Add Shot
+                  </Button>
+
+                  {pendingShots.length > 0 && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-medium">Shots ({pendingShots.length})</h4>
+                          <div className="flex gap-1 flex-wrap">
+                            {CATEGORIES.map((c) => shotCounts[c] ? (
+                              <Badge key={c} variant="outline" className="text-[10px] px-1.5 py-0">
+                                {c}: {shotCounts[c]}
+                              </Badge>
+                            ) : null)}
+                          </div>
+                        </div>
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {pendingShots.map((shot) => (
+                            <div key={shot.id} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-muted/50" data-testid={`shot-item-${shot.id}`}>
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Badge className={`text-[10px] shrink-0 ${CATEGORY_COLORS[shot.category] || ""}`}>
+                                  {shot.category}
+                                </Badge>
+                                {shot.shotType && (
+                                  <span className="text-[10px] text-muted-foreground">{shot.shotType}</span>
+                                )}
+                                <span className="text-[10px] text-muted-foreground truncate">{shot.filename}</span>
+                                <span className="text-[10px] text-muted-foreground shrink-0">{shot.durationSec}s</span>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 shrink-0"
+                                onClick={() => handleDeletePendingShot(shot.id)}
+                                data-testid={`button-delete-shot-${shot.id}`}
+                              >
+                                <Trash2 className="w-3 h-3 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -728,7 +983,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
                   {uploadStep === "uploading-photo" && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {(uploadStep === "uploading-video" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                  {(uploadStep === "uploading-video" || uploadStep === "uploading-music" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
                   <span className={uploadStep === "uploading-photo" ? "font-medium" : "text-muted-foreground"}>
                     Upload photo
                   </span>
@@ -737,18 +992,20 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 {uploadStep === "uploading-photo" && <Progress value={uploadProgress} className="h-2" />}
               </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-sm">
-                  {uploadStep === "uploading-video" && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {(uploadStep === "uploading-music" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
-                  {uploadStep === "uploading-photo" && <span className="w-3 h-3" />}
-                  <span className={uploadStep === "uploading-video" ? "font-medium" : "text-muted-foreground"}>
-                    Upload video
-                  </span>
-                  {uploadStep === "uploading-video" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
+              {videoSource === "edited" && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    {uploadStep === "uploading-video" && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {(uploadStep === "uploading-music" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                    {uploadStep === "uploading-photo" && <span className="w-3 h-3" />}
+                    <span className={uploadStep === "uploading-video" ? "font-medium" : "text-muted-foreground"}>
+                      Upload video
+                    </span>
+                    {uploadStep === "uploading-video" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
+                  </div>
+                  {uploadStep === "uploading-video" && <Progress value={uploadProgress} className="h-2" />}
                 </div>
-                {uploadStep === "uploading-video" && <Progress value={uploadProgress} className="h-2" />}
-              </div>
+              )}
 
               {music && (
                 <div className="space-y-1">
@@ -769,7 +1026,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 {uploadStep === "saving" && <Loader2 className="w-3 h-3 animate-spin" />}
                 {(uploadStep === "uploading-photo" || uploadStep === "uploading-video" || uploadStep === "uploading-music") && <span className="w-3 h-3" />}
                 <span className={uploadStep === "saving" ? "font-medium" : "text-muted-foreground"}>
-                  Save setup
+                  Save setup{videoSource === "builder" ? " + shots" : ""}
                 </span>
               </div>
             </div>

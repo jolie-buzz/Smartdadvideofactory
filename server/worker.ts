@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
+import { renderVariant } from "./video-builder";
 import { spawn } from "child_process";
 import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
@@ -290,6 +291,102 @@ async function processJob(jobId: number): Promise<void> {
   const workDir = await mkdtemp(join(tmpdir(), `job-${jobId}-`));
 
   try {
+    if (asset.videoSource === "builder" && (!asset.videoKey || asset.videoKey === "")) {
+      await storage.updateJob(jobId, { status: "building_video" });
+      await storage.appendJobLog(jobId, "Video Builder mode: auto-generating variant from shot library...");
+
+      const allShots = await storage.getShots(asset.id);
+      if (allShots.length === 0) {
+        throw new Error("No shots uploaded for this Video Builder setup. Upload shot clips first.");
+      }
+
+      const recentClipIds = await storage.getRecentVariantClipIds(asset.id, 10);
+      const shotsByCategory: Record<string, typeof allShots> = {};
+      for (const s of allShots) {
+        if (!shotsByCategory[s.category]) shotsByCategory[s.category] = [];
+        shotsByCategory[s.category].push(s);
+      }
+
+      const hookShots = shotsByCategory["HOOK"] || [];
+      const problemShots = shotsByCategory["PROBLEM"] || [];
+      const solutionShots = shotsByCategory["SOLUTION"] || [];
+      const highlightShots = shotsByCategory["HIGHLIGHT"] || [];
+      const bodyShots = shotsByCategory["BODY"] || [];
+      const ctaShots = shotsByCategory["CTA"] || [];
+
+      if (hookShots.length === 0) throw new Error("At least 1 HOOK shot is required");
+      if (bodyShots.length < 4) throw new Error("At least 4 BODY shots with distinct shotTypes are required");
+
+      const templateDuration = 45;
+      const bodyCount = 6;
+      const usedIds = new Set<number>();
+      const clipIds: number[] = [];
+
+      const pick = (pool: typeof allShots, fallback?: typeof allShots): number | null => {
+        const preferred = pool.filter(s => !usedIds.has(s.id) && !recentClipIds.includes(s.id));
+        const available = preferred.length > 0 ? preferred : pool.filter(s => !usedIds.has(s.id));
+        if (available.length === 0 && fallback) {
+          const fb = fallback.filter(s => !usedIds.has(s.id));
+          if (fb.length > 0) { const c = fb[Math.floor(Math.random() * fb.length)]; usedIds.add(c.id); return c.id; }
+          return null;
+        }
+        if (available.length === 0) return null;
+        const c = available[Math.floor(Math.random() * available.length)];
+        usedIds.add(c.id);
+        return c.id;
+      };
+
+      const hookId = pick(hookShots); if (hookId) clipIds.push(hookId);
+      const problemId = pick(problemShots, hookShots); if (problemId) clipIds.push(problemId);
+      const solutionId = pick(solutionShots, highlightShots); if (solutionId) clipIds.push(solutionId);
+      const highlightId = pick(highlightShots, bodyShots); if (highlightId) clipIds.push(highlightId);
+
+      const usedBodyTypes = new Set<string>();
+      for (let b = 0; b < bodyCount; b++) {
+        let pool: typeof allShots;
+        if (usedBodyTypes.size < 4) {
+          pool = bodyShots.filter(s => !usedIds.has(s.id) && s.shotType && !usedBodyTypes.has(s.shotType));
+          if (pool.length === 0) pool = bodyShots.filter(s => !usedIds.has(s.id));
+        } else {
+          pool = bodyShots.filter(s => !usedIds.has(s.id));
+        }
+        const preferred = pool.filter(s => !recentClipIds.includes(s.id));
+        const candidates = preferred.length > 0 ? preferred : pool;
+        if (candidates.length === 0) break;
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        usedIds.add(chosen.id);
+        if (chosen.shotType) usedBodyTypes.add(chosen.shotType);
+        clipIds.push(chosen.id);
+      }
+
+      if (ctaShots.length > 0) {
+        const ctaId = pick(ctaShots, bodyShots);
+        if (ctaId) clipIds.push(ctaId);
+      }
+
+      const variant = await storage.createVariant({
+        assetId: asset.id,
+        templateDuration,
+        clipIds,
+        status: "rendering",
+      });
+
+      await storage.appendJobLog(jobId, `Variant #${variant.id} created with ${clipIds.length} clips. Rendering...`);
+
+      await renderVariant(variant.id);
+
+      const renderedVariant = await storage.getVariant(variant.id);
+      if (!renderedVariant?.r2Key) {
+        throw new Error("Variant rendering failed - no output file");
+      }
+
+      await storage.updateAsset(asset.id, { videoKey: renderedVariant.r2Key });
+      const updatedAsset = await storage.getAsset(asset.id);
+      if (updatedAsset) Object.assign(asset, updatedAsset);
+
+      await storage.appendJobLog(jobId, `Video built and ready. Continuing pipeline...`);
+    }
+
     await storage.updateJob(jobId, { status: "generating_script" });
     await storage.appendJobLog(jobId, `Generating script with OpenAI (model: ${asset.openaiModel})...`);
 

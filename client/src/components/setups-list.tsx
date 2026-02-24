@@ -11,10 +11,9 @@ import type { Asset } from "@shared/schema";
 interface SetupsListProps {
   onActivate: () => void;
   onEdit: (asset: Asset) => void;
-  onOpenBuilder?: (asset: Asset) => void;
 }
 
-export function SetupsList({ onActivate, onEdit, onOpenBuilder }: SetupsListProps) {
+export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
   const { toast } = useToast();
 
   const assetsQuery = useQuery<Asset[]>({
@@ -137,17 +136,6 @@ export function SetupsList({ onActivate, onEdit, onOpenBuilder }: SetupsListProp
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {asset.videoSource === "builder" && onOpenBuilder && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => onOpenBuilder(asset)}
-                    data-testid={`button-builder-${asset.id}`}
-                  >
-                    <Clapperboard className="w-4 h-4 mr-1" />
-                    Builder
-                  </Button>
-                )}
                 <Button
                   size="sm"
                   onClick={() => activateMutation.mutate(asset.id)}

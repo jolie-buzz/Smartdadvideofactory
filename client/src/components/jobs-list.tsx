@@ -50,6 +50,7 @@ type JobWithAsset = {
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {
   queued: { label: "Queued", color: "secondary", icon: Clock, progress: 5 },
+  building_video: { label: "Building Video", color: "secondary", icon: Film, progress: 10 },
   generating_script: { label: "Generating Script", color: "secondary", icon: FileText, progress: 20 },
   generating_audio: { label: "Generating Audio", color: "secondary", icon: AudioLines, progress: 40 },
   cutting_dead_air: { label: "Cutting Dead Air", color: "secondary", icon: FileAudio, progress: 60 },

@@ -148,6 +148,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [hookHeadline, setHookHeadline] = useState(false);
   const [hookPrompt, setHookPrompt] = useState("");
   const [hookModel, setHookModel] = useState("gpt-4o");
+  const [hookFontSize, setHookFontSize] = useState(48);
+  const [hookFontColor, setHookFontColor] = useState("#FFFFFF");
+  const [hookStrokeColor, setHookStrokeColor] = useState("#000000");
+  const [hookPosition, setHookPosition] = useState("center");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -217,6 +221,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setHookHeadline(editingAsset.hookHeadline ?? false);
       setHookPrompt(editingAsset.hookPrompt || "");
       setHookModel(editingAsset.hookModel || "gpt-4o");
+      setHookFontSize(editingAsset.hookFontSize ?? 48);
+      setHookFontColor(editingAsset.hookFontColor ?? "#FFFFFF");
+      setHookStrokeColor(editingAsset.hookStrokeColor ?? "#000000");
+      setHookPosition(editingAsset.hookPosition ?? "center");
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -346,6 +354,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
+            hookFontSize, hookFontColor, hookStrokeColor, hookPosition,
           }),
         });
         if (!res.ok) {
@@ -427,6 +436,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
+          hookFontSize, hookFontColor, hookStrokeColor, hookPosition,
         }),
       });
 
@@ -1127,6 +1137,72 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <Separator className="my-3" />
+                <p className="text-xs font-medium text-muted-foreground">Font Style</p>
+
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Font Size</Label>
+                    <Select value={String(hookFontSize)} onValueChange={(v) => setHookFontSize(Number(v))} disabled={isUploading}>
+                      <SelectTrigger data-testid="select-hook-font-size" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="32">32 (Small)</SelectItem>
+                        <SelectItem value="40">40 (Medium)</SelectItem>
+                        <SelectItem value="48">48 (Default)</SelectItem>
+                        <SelectItem value="56">56 (Large)</SelectItem>
+                        <SelectItem value="64">64 (XL)</SelectItem>
+                        <SelectItem value="72">72 (XXL)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Position</Label>
+                    <Select value={hookPosition} onValueChange={setHookPosition} disabled={isUploading}>
+                      <SelectTrigger data-testid="select-hook-position" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="top">Top</SelectItem>
+                        <SelectItem value="center">Center</SelectItem>
+                        <SelectItem value="bottom">Bottom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Font Color</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        data-testid="input-hook-font-color"
+                        value={hookFontColor}
+                        onChange={(e) => setHookFontColor(e.target.value)}
+                        disabled={isUploading}
+                        className="w-8 h-8 rounded border cursor-pointer"
+                      />
+                      <span className="text-xs text-muted-foreground">{hookFontColor}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stroke Color</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        data-testid="input-hook-stroke-color"
+                        value={hookStrokeColor}
+                        onChange={(e) => setHookStrokeColor(e.target.value)}
+                        disabled={isUploading}
+                        className="w-8 h-8 rounded border cursor-pointer"
+                      />
+                      <span className="text-xs text-muted-foreground">{hookStrokeColor}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

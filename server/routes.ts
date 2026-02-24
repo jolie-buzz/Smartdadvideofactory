@@ -87,7 +87,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel } = req.body;
+      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, hookFontSize, hookFontColor, hookStrokeColor, hookPosition } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -117,6 +117,10 @@ export async function registerRoutes(
         hookHeadline: hookHeadline || false,
         hookPrompt: hookPrompt || null,
         hookModel: hookModel || "gpt-4o",
+        hookFontSize: typeof hookFontSize === "number" ? hookFontSize : 48,
+        hookFontColor: hookFontColor || "#FFFFFF",
+        hookStrokeColor: hookStrokeColor || "#000000",
+        hookPosition: hookPosition || "center",
       });
 
       res.status(201).json(asset);
@@ -151,7 +155,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, videoSource, videoKey } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, hookFontSize, hookFontColor, hookStrokeColor, hookPosition, videoSource, videoKey } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
@@ -172,6 +176,10 @@ export async function registerRoutes(
       if (hookHeadline !== undefined) updateData.hookHeadline = hookHeadline;
       if (hookPrompt !== undefined) updateData.hookPrompt = hookPrompt;
       if (hookModel !== undefined) updateData.hookModel = hookModel;
+      if (hookFontSize !== undefined) updateData.hookFontSize = typeof hookFontSize === "number" ? hookFontSize : parseInt(hookFontSize);
+      if (hookFontColor !== undefined) updateData.hookFontColor = hookFontColor;
+      if (hookStrokeColor !== undefined) updateData.hookStrokeColor = hookStrokeColor;
+      if (hookPosition !== undefined) updateData.hookPosition = hookPosition;
 
       const updated = await storage.updateAsset(id, updateData);
       res.json(updated);

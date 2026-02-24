@@ -273,7 +273,8 @@ async function generateHookHeadline(personaPrompt: string, hookPrompt: string | 
 async function overlayHookHeadline(
   videoBuffer: Buffer,
   headline: string,
-  workDir: string
+  workDir: string,
+  fontOptions?: { fontSize?: number; fontColor?: string; strokeColor?: string; position?: string }
 ): Promise<Buffer> {
   const videoPath = join(workDir, "video_for_hook.mp4");
   const textPath = join(workDir, "hook_headline.txt");
@@ -284,9 +285,21 @@ async function overlayHookHeadline(
 
   const escapedTextPath = textPath.replace(/\\/g, "/").replace(/:/g, "\\:");
 
+  const fontSize = fontOptions?.fontSize || 48;
+  const fontColor = (fontOptions?.fontColor || "#FFFFFF").replace("#", "0x");
+  const strokeColor = (fontOptions?.strokeColor || "#000000").replace("#", "0x");
+  const position = fontOptions?.position || "center";
+
+  let yExpr: string;
+  switch (position) {
+    case "top": yExpr = "h*0.12"; break;
+    case "bottom": yExpr = "h-text_h-h*0.12"; break;
+    default: yExpr = "(h-text_h)/2"; break;
+  }
+
   await runFfmpeg([
     "-i", videoPath,
-    "-vf", `drawtext=textfile='${escapedTextPath}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:font=FreeSans`,
+    "-vf", `drawtext=textfile='${escapedTextPath}':fontsize=${fontSize}:fontcolor=${fontColor}:borderw=3:bordercolor=${strokeColor}:x=(w-text_w)/2:y=${yExpr}:font=FreeSans`,
     "-c:a", "copy",
     "-y",
     outputPath,
@@ -481,7 +494,12 @@ async function processJob(jobId: number): Promise<void> {
         const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
         await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
         await storage.appendJobLog(jobId, "Overlaying hook headline on video...");
-        finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir);
+        finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir, {
+          fontSize: asset.hookFontSize,
+          fontColor: asset.hookFontColor,
+          strokeColor: asset.hookStrokeColor,
+          position: asset.hookPosition,
+        });
         await storage.appendJobLog(jobId, "Hook headline added successfully");
       } catch (err: any) {
         await storage.appendJobLog(jobId, `Warning: Hook headline failed: ${err.message}. Continuing without hook.`);

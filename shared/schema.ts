@@ -25,6 +25,10 @@ export const assets = pgTable("assets", {
   hookHeadline: boolean("hook_headline").notNull().default(false),
   hookPrompt: text("hook_prompt"),
   hookModel: text("hook_model").notNull().default("gpt-4o"),
+  hookFontSize: integer("hook_font_size").notNull().default(48),
+  hookFontColor: text("hook_font_color").notNull().default("#FFFFFF"),
+  hookStrokeColor: text("hook_stroke_color").notNull().default("#000000"),
+  hookPosition: text("hook_position").notNull().default("center"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

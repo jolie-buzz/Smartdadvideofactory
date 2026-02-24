@@ -152,6 +152,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [hookFontColor, setHookFontColor] = useState("#FFFFFF");
   const [hookStrokeColor, setHookStrokeColor] = useState("#000000");
   const [hookPosition, setHookPosition] = useState("center");
+  const [hookEffect, setHookEffect] = useState("border");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -225,6 +226,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setHookFontColor(editingAsset.hookFontColor ?? "#FFFFFF");
       setHookStrokeColor(editingAsset.hookStrokeColor ?? "#000000");
       setHookPosition(editingAsset.hookPosition ?? "center");
+      setHookEffect(editingAsset.hookEffect ?? "border");
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -354,7 +356,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
-            hookFontSize, hookFontColor, hookStrokeColor, hookPosition,
+            hookFontSize, hookFontColor, hookStrokeColor, hookPosition, hookEffect,
           }),
         });
         if (!res.ok) {
@@ -436,7 +438,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
-          hookFontSize, hookFontColor, hookStrokeColor, hookPosition,
+          hookFontSize, hookFontColor, hookStrokeColor, hookPosition, hookEffect,
         }),
       });
 
@@ -1141,6 +1143,21 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
                 <Separator className="my-3" />
                 <p className="text-xs font-medium text-muted-foreground">Font Style</p>
+
+                <div className="space-y-1 mt-2">
+                  <Label className="text-xs">Effect</Label>
+                  <Select value={hookEffect} onValueChange={setHookEffect} disabled={isUploading}>
+                    <SelectTrigger data-testid="select-hook-effect" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="border">Border (Outline)</SelectItem>
+                      <SelectItem value="shadow">Shadow (Drop Shadow)</SelectItem>
+                      <SelectItem value="glow">Glow (Soft Glow)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-2">
                   <div className="space-y-1">

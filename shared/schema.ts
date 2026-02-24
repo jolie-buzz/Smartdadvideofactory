@@ -29,6 +29,7 @@ export const assets = pgTable("assets", {
   hookFontColor: text("hook_font_color").notNull().default("#FFFFFF"),
   hookStrokeColor: text("hook_stroke_color").notNull().default("#000000"),
   hookPosition: text("hook_position").notNull().default("center"),
+  hookEffect: text("hook_effect").notNull().default("border"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

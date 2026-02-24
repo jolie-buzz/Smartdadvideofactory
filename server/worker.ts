@@ -274,7 +274,7 @@ async function overlayHookHeadline(
   videoBuffer: Buffer,
   headline: string,
   workDir: string,
-  fontOptions?: { fontSize?: number; fontColor?: string; strokeColor?: string; position?: string }
+  fontOptions?: { fontSize?: number; fontColor?: string; strokeColor?: string; position?: string; effect?: string }
 ): Promise<Buffer> {
   const videoPath = join(workDir, "video_for_hook.mp4");
   const textPath = join(workDir, "hook_headline.txt");
@@ -289,6 +289,7 @@ async function overlayHookHeadline(
   const fontColor = (fontOptions?.fontColor || "#FFFFFF").replace("#", "0x");
   const strokeColor = (fontOptions?.strokeColor || "#000000").replace("#", "0x");
   const position = fontOptions?.position || "center";
+  const effect = fontOptions?.effect || "border";
 
   let yExpr: string;
   switch (position) {
@@ -297,9 +298,27 @@ async function overlayHookHeadline(
     default: yExpr = "(h-text_h)/2"; break;
   }
 
+  const baseParams = `textfile='${escapedTextPath}':fontsize=${fontSize}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${yExpr}:font=FreeSans`;
+
+  let effectParams: string;
+  switch (effect) {
+    case "shadow":
+      effectParams = `${baseParams}:shadowcolor=${strokeColor}@0.7:shadowx=3:shadowy=3`;
+      break;
+    case "glow":
+      effectParams = `${baseParams}:borderw=5:bordercolor=${strokeColor}@0.6:shadowcolor=${fontColor}@0.5:shadowx=2:shadowy=2`;
+      break;
+    case "none":
+      effectParams = baseParams;
+      break;
+    default:
+      effectParams = `${baseParams}:borderw=3:bordercolor=${strokeColor}`;
+      break;
+  }
+
   await runFfmpeg([
     "-i", videoPath,
-    "-vf", `drawtext=textfile='${escapedTextPath}':fontsize=${fontSize}:fontcolor=${fontColor}:borderw=3:bordercolor=${strokeColor}:x=(w-text_w)/2:y=${yExpr}:font=FreeSans`,
+    "-vf", `drawtext=${effectParams}`,
     "-c:a", "copy",
     "-y",
     outputPath,
@@ -499,6 +518,7 @@ async function processJob(jobId: number): Promise<void> {
           fontColor: asset.hookFontColor,
           strokeColor: asset.hookStrokeColor,
           position: asset.hookPosition,
+          effect: asset.hookEffect,
         });
         await storage.appendJobLog(jobId, "Hook headline added successfully");
       } catch (err: any) {

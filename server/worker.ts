@@ -28,13 +28,16 @@ const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 async function generateScript(personaPrompt: string, photoUrl: string | null, model: string): Promise<string> {
   const systemMessage = `You are a SmartDad video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
 
+IMPORTANT: The script MUST be short enough to be narrated in 45 seconds or less when read aloud at a natural pace. Aim for 80-100 words total.
+
 Follow this exact format:
 - Line 1: An unskippable hook line (attention-grabbing, makes viewer stop scrolling)
-- Lines 2-8: 6-10 short, easy-to-narrate lines about the product benefits and features
+- Lines 2-6: 4-6 short, easy-to-narrate lines about the product benefits and features
 - Last line: A hard call-to-action (CTA) line
 
 Rules:
-- Keep each line short and punchy (max 15 words per line)
+- Keep each line short and punchy (max 12 words per line)
+- Total script: 6-8 lines only, 80-100 words max
 - Use conversational Taglish tone
 - Output ONLY the script lines, one per line, no numbering, no labels
 - No stage directions or notes
@@ -281,7 +284,7 @@ async function overlayHookHeadline(
 
   await runFfmpeg([
     "-i", videoPath,
-    "-vf", `drawtext=text='${escapedHeadline}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,0,3)'`,
+    "-vf", `drawtext=text='${escapedHeadline}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2`,
     "-c:a", "copy",
     "-y",
     outputPath,
@@ -473,7 +476,7 @@ async function processJob(jobId: number): Promise<void> {
     if (asset.hookHeadline) {
       await storage.appendJobLog(jobId, "Generating hook headline via AI...");
       try {
-        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.openaiModel);
+        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
         await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
         await storage.appendJobLog(jobId, "Overlaying hook headline on video...");
         finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir);

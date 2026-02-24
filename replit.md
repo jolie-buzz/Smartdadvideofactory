@@ -73,6 +73,7 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-24: Hook headline now overlays full video duration (not just 3s), script prompt targets 45s voiceover (80-100 words), hookModel selector added, jobs deletable regardless of status
 - 2026-02-24: Fixed caption burning: installed libass/fontconfig/fonts, added FFmpeg timeout (180s captions, 120s hook), UTF-8 BOM for SRT, FontName=FreeSans
 - 2026-02-24: Built CapCut-style video trimmer for Video Builder: thumbnail timeline strip, draggable start/end handles, region drag, playhead sync, preview clip playback
 - 2026-02-24: Added Video Builder feature (shot library, variant generation, FFmpeg rendering, send-to-pipeline)

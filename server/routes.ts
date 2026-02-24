@@ -87,7 +87,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
+      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -116,6 +116,7 @@ export async function registerRoutes(
         autoCaptions: autoCaptions || false,
         hookHeadline: hookHeadline || false,
         hookPrompt: hookPrompt || null,
+        hookModel: hookModel || "gpt-4o",
       });
 
       res.status(201).json(asset);
@@ -150,7 +151,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, videoSource, videoKey } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, videoSource, videoKey } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
@@ -170,6 +171,7 @@ export async function registerRoutes(
       if (autoCaptions !== undefined) updateData.autoCaptions = autoCaptions;
       if (hookHeadline !== undefined) updateData.hookHeadline = hookHeadline;
       if (hookPrompt !== undefined) updateData.hookPrompt = hookPrompt;
+      if (hookModel !== undefined) updateData.hookModel = hookModel;
 
       const updated = await storage.updateAsset(id, updateData);
       res.json(updated);

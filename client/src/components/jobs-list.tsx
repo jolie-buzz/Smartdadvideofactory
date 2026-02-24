@@ -382,9 +382,9 @@ export function JobsList() {
                     size="icon"
                     variant="secondary"
                     onClick={() => deleteJobMutation.mutate(job.id)}
-                    disabled={deleteJobMutation.isPending || isActive}
+                    disabled={deleteJobMutation.isPending}
                     data-testid={`button-delete-job-${job.id}`}
-                    title={isActive ? "Cannot delete while processing" : "Delete job"}
+                    title="Delete job"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>

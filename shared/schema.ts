@@ -24,6 +24,7 @@ export const assets = pgTable("assets", {
   autoCaptions: boolean("auto_captions").notNull().default(false),
   hookHeadline: boolean("hook_headline").notNull().default(false),
   hookPrompt: text("hook_prompt"),
+  hookModel: text("hook_model").notNull().default("gpt-4o"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

@@ -147,6 +147,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [autoCaptions, setAutoCaptions] = useState(false);
   const [hookHeadline, setHookHeadline] = useState(false);
   const [hookPrompt, setHookPrompt] = useState("");
+  const [hookModel, setHookModel] = useState("gpt-4o");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +216,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setAutoCaptions(editingAsset.autoCaptions ?? false);
       setHookHeadline(editingAsset.hookHeadline ?? false);
       setHookPrompt(editingAsset.hookPrompt || "");
+      setHookModel(editingAsset.hookModel || "gpt-4o");
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -343,7 +345,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           body: JSON.stringify({
             name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
-            voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
+            voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
           }),
         });
         if (!res.ok) {
@@ -424,7 +426,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
-          autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
+          autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
         }),
       });
 
@@ -1113,6 +1115,19 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 <p className="text-xs text-muted-foreground">
                   Custom prompt for generating the hook headline. Leave empty for a default hook.
                 </p>
+                <div className="space-y-1 mt-2">
+                  <Label className="text-xs">Hook Headline Model</Label>
+                  <Select value={hookModel} onValueChange={setHookModel} disabled={isUploading}>
+                    <SelectTrigger data-testid="select-hook-model" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPENAI_MODELS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
           </div>

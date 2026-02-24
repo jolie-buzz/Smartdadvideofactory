@@ -456,6 +456,97 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/upload-source-url", async (req, res) => {
+    try {
+      const { assetId, filename, contentType } = req.body;
+      if (!assetId || !filename || !contentType) {
+        return res.status(400).json({ error: "assetId, filename, and contentType are required" });
+      }
+      const ext = filename.split(".").pop()?.toLowerCase() || "mp4";
+      const key = `sources/${assetId}/${uuidv4().slice(0, 8)}.${ext}`;
+      const url = await getSignedUploadUrl(key, contentType);
+      res.json({ url, key });
+    } catch (err: any) {
+      console.error("Source video presigned URL error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/trim-shot", async (req, res) => {
+    try {
+      const { sourceR2Key, startSec, endSec, assetId } = req.body;
+      if (!sourceR2Key || startSec === undefined || endSec === undefined || !assetId) {
+        return res.status(400).json({ error: "sourceR2Key, startSec, endSec, and assetId are required" });
+      }
+
+      if (!sourceR2Key.startsWith("sources/")) {
+        return res.status(400).json({ error: "Invalid source key" });
+      }
+
+      const start = parseFloat(startSec);
+      const end = parseFloat(endSec);
+      if (isNaN(start) || isNaN(end) || start < 0 || end <= start) {
+        return res.status(400).json({ error: "Invalid start/end times" });
+      }
+      if (end - start > 60) {
+        return res.status(400).json({ error: "Maximum clip duration is 60 seconds" });
+      }
+
+      const workDir = path.join(os.tmpdir(), `trim-${Date.now()}`);
+      fs.mkdirSync(workDir, { recursive: true });
+
+      const srcExt = sourceR2Key.split(".").pop()?.toLowerCase() || "mp4";
+      const inputPath = path.join(workDir, `source.${srcExt}`);
+      const outputPath = path.join(workDir, "trimmed.mp4");
+
+      const fileBuffer = await downloadFromR2(sourceR2Key);
+
+      const maxSourceMB = 500;
+      if (fileBuffer.length > maxSourceMB * 1024 * 1024) {
+        return res.status(400).json({ error: `Source video too large (${(fileBuffer.length / 1024 / 1024).toFixed(0)} MB). Max is ${maxSourceMB} MB.` });
+      }
+
+      fs.writeFileSync(inputPath, fileBuffer);
+
+      await new Promise<void>((resolve, reject) => {
+        const { spawn } = require("child_process");
+        const ffmpeg = spawn("ffmpeg", [
+          "-i", inputPath,
+          "-ss", String(start),
+          "-to", String(end),
+          "-c:v", "libx264",
+          "-preset", "fast",
+          "-c:a", "aac",
+          "-y",
+          outputPath,
+        ]);
+        let stderr = "";
+        ffmpeg.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+        ffmpeg.on("close", (code: number) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg trim failed (code ${code}): ${stderr.slice(-500)}`));
+        });
+        ffmpeg.on("error", reject);
+      });
+
+      const uniqueId = uuidv4().slice(0, 8);
+      const trimmedKey = `shots/${assetId}/${uniqueId}.mp4`;
+      const trimmedBuffer = fs.readFileSync(outputPath);
+      await uploadToR2(trimmedKey, trimmedBuffer, "video/mp4");
+
+      const actualDuration = end - start;
+
+      try { fs.unlinkSync(inputPath); } catch {}
+      try { fs.unlinkSync(outputPath); } catch {}
+      try { fs.rmdirSync(workDir); } catch {}
+
+      res.json({ key: trimmedKey, durationSec: Math.round(actualDuration * 10) / 10 });
+    } catch (err: any) {
+      console.error("Trim shot error:", err);
+      res.status(500).json({ error: err.message || "Failed to trim video" });
+    }
+  });
+
   app.post("/api/upload-shot-url", async (req, res) => {
     try {
       const { assetId, filename, contentType } = req.body;

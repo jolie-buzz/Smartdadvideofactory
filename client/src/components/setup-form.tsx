@@ -13,7 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2 } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors, Play, SkipForward, SkipBack } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { Asset } from "@shared/schema";
 
@@ -154,13 +154,22 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const [tempAssetId] = useState(() => crypto.randomUUID());
   const [pendingShots, setPendingShots] = useState<PendingShot[]>([]);
-  const [shotFile, setShotFile] = useState<File | null>(null);
   const [shotCategory, setShotCategory] = useState<string>("BODY");
   const [shotType, setShotType] = useState<string>("");
-  const [shotDuration, setShotDuration] = useState<string>("6");
   const [shotUploading, setShotUploading] = useState(false);
   const [shotUploadProgress, setShotUploadProgress] = useState(0);
-  const shotInputRef = useRef<HTMLInputElement>(null);
+
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourceR2Key, setSourceR2Key] = useState<string | null>(null);
+  const [sourceUploading, setSourceUploading] = useState(false);
+  const [sourceUploadProgress, setSourceUploadProgress] = useState(0);
+  const [trimStart, setTrimStart] = useState<string>("0");
+  const [trimEnd, setTrimEnd] = useState<string>("6");
+  const [trimming, setTrimming] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+  const sourceVideoRef = useRef<HTMLVideoElement>(null);
 
   const isEditing = !!editingAsset;
   const isUploading = uploadStep !== "idle" && uploadStep !== "done";
@@ -197,37 +206,32 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     queryKey: ["/api/elevenlabs/models"],
   });
 
-  const handleUploadShot = async () => {
-    if (!shotFile) return;
-
-    setShotUploading(true);
-    setShotUploadProgress(0);
-
+  const handleUploadSource = async (file: File) => {
+    setSourceUploading(true);
+    setSourceUploadProgress(0);
     try {
       const defaultMime = "video/mp4";
-      const presignRes = await fetch("/api/upload-shot-url", {
+      const presignRes = await fetch("/api/upload-source-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assetId: tempAssetId,
-          filename: shotFile.name,
-          contentType: shotFile.type || defaultMime,
+          filename: file.name,
+          contentType: file.type || defaultMime,
         }),
       });
-
       if (!presignRes.ok) {
         const err = await presignRes.json().catch(() => ({}));
         throw new Error(err.error || "Failed to get upload URL");
       }
-
       const { url, key } = await presignRes.json();
 
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", url);
-        xhr.setRequestHeader("Content-Type", shotFile.type || defaultMime);
+        xhr.setRequestHeader("Content-Type", file.type || defaultMime);
         xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) setShotUploadProgress(Math.round((e.loaded / e.total) * 100));
+          if (e.lengthComputable) setSourceUploadProgress(Math.round((e.loaded / e.total) * 100));
         });
         xhr.addEventListener("load", () => {
           if (xhr.status >= 200 && xhr.status < 300) resolve();
@@ -235,28 +239,81 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         });
         xhr.addEventListener("error", () => reject(new Error("Network error")));
         xhr.timeout = 10 * 60 * 1000;
-        xhr.send(shotFile);
+        xhr.send(file);
       });
+
+      setSourceR2Key(key);
+      toast({ title: "Source video uploaded", description: "You can now trim shots from this video." });
+    } catch (err: any) {
+      toast({ title: "Upload error", description: err.message, variant: "destructive" });
+    } finally {
+      setSourceUploading(false);
+      setSourceUploadProgress(0);
+    }
+  };
+
+  const handleTrimShot = async () => {
+    if (!sourceR2Key || sourceUploading) return;
+    const start = parseFloat(trimStart);
+    const end = parseFloat(trimEnd);
+    if (isNaN(start) || isNaN(end) || end <= start) {
+      toast({ title: "Invalid trim", description: "End time must be after start time.", variant: "destructive" });
+      return;
+    }
+    if (videoDuration > 0 && end > videoDuration + 0.5) {
+      toast({ title: "Invalid trim", description: `End time (${end}s) exceeds video duration (${videoDuration}s).`, variant: "destructive" });
+      return;
+    }
+
+    setTrimming(true);
+    setShotUploadProgress(0);
+    try {
+      const res = await fetch("/api/trim-shot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceR2Key,
+          startSec: start,
+          endSec: end,
+          assetId: tempAssetId,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to trim video");
+      }
+      const { key, durationSec } = await res.json();
 
       const newShot: PendingShot = {
         id: crypto.randomUUID(),
         r2Key: key,
         category: shotCategory,
         shotType: shotType && shotType !== "none" ? shotType : null,
-        durationSec: parseFloat(shotDuration),
-        filename: shotFile.name,
+        durationSec,
+        filename: `trim_${formatTime(start)}-${formatTime(end)}`,
       };
 
       setPendingShots((prev) => [...prev, newShot]);
-      toast({ title: "Shot uploaded", description: `${shotFile.name} added to shot library.` });
-      setShotFile(null);
-      if (shotInputRef.current) shotInputRef.current.value = "";
+      toast({ title: "Shot trimmed", description: `${newShot.filename} (${durationSec}s) added as ${shotCategory}.` });
     } catch (err: any) {
-      toast({ title: "Upload error", description: err.message, variant: "destructive" });
+      toast({ title: "Trim error", description: err.message, variant: "destructive" });
     } finally {
-      setShotUploading(false);
-      setShotUploadProgress(0);
+      setTrimming(false);
     }
+  };
+
+  const formatTime = (sec: number): string => {
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toFixed(1);
+    return `${m}:${s.padStart(4, "0")}`;
+  };
+
+  const handleSetTrimFromPlayer = (which: "start" | "end") => {
+    const vid = sourceVideoRef.current;
+    if (!vid) return;
+    const t = Math.round(vid.currentTime * 10) / 10;
+    if (which === "start") setTrimStart(String(t));
+    else setTrimEnd(String(t));
   };
 
   const handleDeletePendingShot = (shotId: string) => {
@@ -402,9 +459,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setHookHeadline(false);
       setHookPrompt("");
       setPendingShots([]);
+      setSourceFile(null);
+      setSourceR2Key(null);
       if (photoInputRef.current) photoInputRef.current.value = "";
       if (videoInputRef.current) videoInputRef.current.value = "";
       if (musicInputRef.current) musicInputRef.current.value = "";
+      if (sourceInputRef.current) sourceInputRef.current.value = "";
       onComplete();
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to save setup", variant: "destructive" });
@@ -566,85 +626,210 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                     <h4 className="text-sm font-medium">Shot Library</h4>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Upload 9:16 vertical clips tagged by category. Need at least 1 HOOK and 4 BODY shots with different types.
+                    Upload a source video, then trim multiple shots from it. Need at least 1 HOOK and 4 BODY shots with different types.
                   </p>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Video Clip</Label>
-                      <Input
-                        ref={shotInputRef}
-                        data-testid="input-shot-file"
-                        type="file"
-                        accept="video/*"
-                        onChange={(e) => setShotFile(e.target.files?.[0] || null)}
-                        disabled={shotUploading || isUploading}
-                        className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-xs text-xs"
-                      />
+                      <Label className="text-xs">Source Video</Label>
+                      {!sourceFile ? (
+                        <Input
+                          ref={sourceInputRef}
+                          data-testid="input-source-video"
+                          type="file"
+                          accept="video/*"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] || null;
+                            if (f) {
+                              setSourceFile(f);
+                              setSourceR2Key(null);
+                              handleUploadSource(f);
+                            }
+                          }}
+                          disabled={sourceUploading || trimming || isUploading}
+                          className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-xs text-xs"
+                        />
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Film className="w-3 h-3" />
+                              {sourceFile.name} ({(sourceFile.size / 1024 / 1024).toFixed(1)} MB)
+                              {sourceR2Key && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                            </p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-xs"
+                              onClick={() => {
+                                setSourceFile(null);
+                                setSourceR2Key(null);
+                                if (sourceInputRef.current) sourceInputRef.current.value = "";
+                              }}
+                              disabled={sourceUploading || trimming}
+                              data-testid="button-change-source"
+                            >
+                              Change
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {sourceUploading && (
+                        <div className="space-y-1">
+                          <Progress value={sourceUploadProgress} className="h-2" />
+                          <p className="text-xs text-muted-foreground">Uploading source video... {sourceUploadProgress}%</p>
+                        </div>
+                      )}
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Category</Label>
-                      <Select value={shotCategory} onValueChange={setShotCategory} disabled={shotUploading || isUploading}>
-                        <SelectTrigger data-testid="select-shot-category" className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+
+                    {sourceFile && sourceR2Key && (
+                      <>
+                        <div className="rounded-md overflow-hidden bg-black">
+                          <video
+                            ref={sourceVideoRef}
+                            src={URL.createObjectURL(sourceFile)}
+                            controls
+                            className="w-full max-h-64"
+                            data-testid="video-source-preview"
+                            onTimeUpdate={() => {
+                              const vid = sourceVideoRef.current;
+                              if (vid) setCurrentTime(Math.round(vid.currentTime * 10) / 10);
+                            }}
+                            onLoadedMetadata={() => {
+                              const vid = sourceVideoRef.current;
+                              if (vid) setVideoDuration(Math.round(vid.duration * 10) / 10);
+                            }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                          <span>Current: <span className="font-mono font-medium text-foreground">{formatTime(currentTime)}</span></span>
+                          <span>Duration: <span className="font-mono">{formatTime(videoDuration)}</span></span>
+                        </div>
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Scissors className="w-4 h-4" />
+                            <h4 className="text-xs font-medium">Trim a Shot</h4>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[10px]">Start (sec)</Label>
+                              <div className="flex gap-1">
+                                <Input
+                                  data-testid="input-trim-start"
+                                  type="number"
+                                  value={trimStart}
+                                  onChange={(e) => setTrimStart(e.target.value)}
+                                  min="0"
+                                  step="0.1"
+                                  disabled={trimming}
+                                  className="h-8 text-xs"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  onClick={() => handleSetTrimFromPlayer("start")}
+                                  disabled={trimming}
+                                  data-testid="button-set-start"
+                                  title="Set start from current playback position"
+                                >
+                                  <SkipBack className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px]">End (sec)</Label>
+                              <div className="flex gap-1">
+                                <Input
+                                  data-testid="input-trim-end"
+                                  type="number"
+                                  value={trimEnd}
+                                  onChange={(e) => setTrimEnd(e.target.value)}
+                                  min="0"
+                                  step="0.1"
+                                  disabled={trimming}
+                                  className="h-8 text-xs"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  onClick={() => handleSetTrimFromPlayer("end")}
+                                  disabled={trimming}
+                                  data-testid="button-set-end"
+                                  title="Set end from current playback position"
+                                >
+                                  <SkipForward className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {parseFloat(trimEnd) > parseFloat(trimStart) && (
+                            <p className="text-[10px] text-muted-foreground">
+                              Clip duration: {(parseFloat(trimEnd) - parseFloat(trimStart)).toFixed(1)}s
+                            </p>
+                          )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[10px]">Category</Label>
+                              <Select value={shotCategory} onValueChange={setShotCategory} disabled={trimming || isUploading}>
+                                <SelectTrigger data-testid="select-shot-category" className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CATEGORIES.map((c) => (
+                                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px]">Shot Type {shotCategory === "BODY" ? "(required)" : "(optional)"}</Label>
+                              <Select value={shotType} onValueChange={setShotType} disabled={trimming || isUploading}>
+                                <SelectTrigger data-testid="select-shot-type" className="h-8 text-xs">
+                                  <SelectValue placeholder="Select type..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  {SHOT_TYPES.map((t) => (
+                                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+
+                          {trimming && (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <p className="text-xs text-muted-foreground">Trimming clip on server...</p>
+                              </div>
+                            </div>
+                          )}
+
+                          <Button
+                            onClick={handleTrimShot}
+                            disabled={!sourceR2Key || trimming || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none")) || parseFloat(trimEnd) <= parseFloat(trimStart)}
+                            data-testid="button-trim-shot"
+                            size="sm"
+                            className="w-full"
+                          >
+                            {trimming ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Scissors className="w-3 h-3 mr-1" />}
+                            Trim & Add Shot
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Shot Type {shotCategory === "BODY" ? "(required)" : "(optional)"}</Label>
-                      <Select value={shotType} onValueChange={setShotType} disabled={shotUploading || isUploading}>
-                        <SelectTrigger data-testid="select-shot-type" className="h-9">
-                          <SelectValue placeholder="Select type..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {SHOT_TYPES.map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Duration (sec)</Label>
-                      <Input
-                        data-testid="input-shot-duration"
-                        type="number"
-                        value={shotDuration}
-                        onChange={(e) => setShotDuration(e.target.value)}
-                        min="1"
-                        max="30"
-                        step="0.5"
-                        disabled={shotUploading || isUploading}
-                        className="h-9"
-                      />
-                    </div>
-                  </div>
-
-                  {shotUploading && (
-                    <div className="space-y-1">
-                      <Progress value={shotUploadProgress} className="h-2" />
-                      <p className="text-xs text-muted-foreground">Uploading clip... {shotUploadProgress}%</p>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={handleUploadShot}
-                    disabled={!shotFile || shotUploading || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none"))}
-                    data-testid="button-upload-shot"
-                    size="sm"
-                    className="w-full"
-                  >
-                    {shotUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
-                    Add Shot
-                  </Button>
 
                   {pendingShots.length > 0 && (
                     <>

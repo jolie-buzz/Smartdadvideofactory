@@ -148,11 +148,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [hookHeadline, setHookHeadline] = useState(false);
   const [hookPrompt, setHookPrompt] = useState("");
   const [hookModel, setHookModel] = useState("gpt-4o");
-  const [hookFontSize, setHookFontSize] = useState(48);
-  const [hookFontColor, setHookFontColor] = useState("#FFFFFF");
-  const [hookStrokeColor, setHookStrokeColor] = useState("#000000");
-  const [hookPosition, setHookPosition] = useState("center");
-  const [hookEffect, setHookEffect] = useState("border");
+  const [captionEnabled, setCaptionEnabled] = useState(false);
+  const [captionPrompt, setCaptionPrompt] = useState("");
+  const [captionModel, setCaptionModel] = useState("gpt-4o");
+  const [seoEnabled, setSeoEnabled] = useState(false);
+  const [seoPrompt, setSeoPrompt] = useState("");
+  const [seoModel, setSeoModel] = useState("gpt-4o");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -222,11 +223,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setHookHeadline(editingAsset.hookHeadline ?? false);
       setHookPrompt(editingAsset.hookPrompt || "");
       setHookModel(editingAsset.hookModel || "gpt-4o");
-      setHookFontSize(editingAsset.hookFontSize ?? 48);
-      setHookFontColor(editingAsset.hookFontColor ?? "#FFFFFF");
-      setHookStrokeColor(editingAsset.hookStrokeColor ?? "#000000");
-      setHookPosition(editingAsset.hookPosition ?? "center");
-      setHookEffect(editingAsset.hookEffect ?? "border");
+      setCaptionEnabled(editingAsset.captionEnabled ?? false);
+      setCaptionPrompt(editingAsset.captionPrompt || "");
+      setCaptionModel(editingAsset.captionModel || "gpt-4o");
+      setSeoEnabled(editingAsset.seoEnabled ?? false);
+      setSeoPrompt(editingAsset.seoPrompt || "");
+      setSeoModel(editingAsset.seoModel || "gpt-4o");
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -356,7 +358,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
-            hookFontSize, hookFontColor, hookStrokeColor, hookPosition, hookEffect,
+            captionEnabled, captionPrompt: captionPrompt || null, captionModel,
+            seoEnabled, seoPrompt: seoPrompt || null, seoModel,
           }),
         });
         if (!res.ok) {
@@ -438,7 +441,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
-          hookFontSize, hookFontColor, hookStrokeColor, hookPosition, hookEffect,
+          captionEnabled, captionPrompt: captionPrompt || null, captionModel,
+          seoEnabled, seoPrompt: seoPrompt || null, seoModel,
         }),
       });
 
@@ -1101,7 +1105,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             <div className="flex items-center justify-between py-2">
               <div className="space-y-0.5">
                 <Label htmlFor="hookheadline-toggle" className="text-sm font-medium">Hook Headline</Label>
-                <p className="text-xs text-muted-foreground">Add an AI-generated hook headline overlay at the start of the video</p>
+                <p className="text-xs text-muted-foreground">Generate an AI hook headline text (copy-paste ready)</p>
               </div>
               <Switch
                 id="hookheadline-toggle"
@@ -1113,22 +1117,22 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             </div>
 
             {hookHeadline && (
-              <div className="space-y-2">
+              <div className="space-y-2 pl-4 border-l-2 border-muted">
                 <Label htmlFor="hook-prompt">Hook Headline Prompt</Label>
                 <Textarea
                   id="hook-prompt"
                   data-testid="input-hook-prompt"
-                  placeholder="e.g. 'Create a 5-7 word attention-grabbing headline about this product that makes people stop scrolling'"
+                  placeholder="e.g. 'Create a 5-7 word attention-grabbing headline about this product'"
                   value={hookPrompt}
                   onChange={(e) => setHookPrompt(e.target.value)}
-                  rows={3}
+                  rows={2}
                   disabled={isUploading}
                 />
                 <p className="text-xs text-muted-foreground">
                   Custom prompt for generating the hook headline. Leave empty for a default hook.
                 </p>
                 <div className="space-y-1 mt-2">
-                  <Label className="text-xs">Hook Headline Model</Label>
+                  <Label className="text-xs">Hook Model</Label>
                   <Select value={hookModel} onValueChange={setHookModel} disabled={isUploading}>
                     <SelectTrigger data-testid="select-hook-model" className="h-8 text-xs">
                       <SelectValue />
@@ -1140,86 +1144,95 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            )}
 
-                <Separator className="my-3" />
-                <p className="text-xs font-medium text-muted-foreground">Font Style</p>
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="caption-toggle" className="text-sm font-medium">Social Media Caption</Label>
+                <p className="text-xs text-muted-foreground">Generate an AI caption for your post (copy-paste ready)</p>
+              </div>
+              <Switch
+                id="caption-toggle"
+                data-testid="switch-caption"
+                checked={captionEnabled}
+                onCheckedChange={setCaptionEnabled}
+                disabled={isUploading}
+              />
+            </div>
 
+            {captionEnabled && (
+              <div className="space-y-2 pl-4 border-l-2 border-muted">
+                <Label htmlFor="caption-prompt">Caption Prompt</Label>
+                <Textarea
+                  id="caption-prompt"
+                  data-testid="input-caption-prompt"
+                  placeholder="e.g. 'Write an engaging FB/IG caption with emojis and hashtags'"
+                  value={captionPrompt}
+                  onChange={(e) => setCaptionPrompt(e.target.value)}
+                  rows={2}
+                  disabled={isUploading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Custom prompt for caption style. Leave empty for a default social media caption.
+                </p>
                 <div className="space-y-1 mt-2">
-                  <Label className="text-xs">Effect</Label>
-                  <Select value={hookEffect} onValueChange={setHookEffect} disabled={isUploading}>
-                    <SelectTrigger data-testid="select-hook-effect" className="h-8 text-xs">
+                  <Label className="text-xs">Caption Model</Label>
+                  <Select value={captionModel} onValueChange={setCaptionModel} disabled={isUploading}>
+                    <SelectTrigger data-testid="select-caption-model" className="h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="border">Border (Outline)</SelectItem>
-                      <SelectItem value="shadow">Shadow (Drop Shadow)</SelectItem>
-                      <SelectItem value="glow">Glow (Soft Glow)</SelectItem>
+                      {OPENAI_MODELS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            )}
 
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Font Size</Label>
-                    <Select value={String(hookFontSize)} onValueChange={(v) => setHookFontSize(Number(v))} disabled={isUploading}>
-                      <SelectTrigger data-testid="select-hook-font-size" className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="32">32 (Small)</SelectItem>
-                        <SelectItem value="40">40 (Medium)</SelectItem>
-                        <SelectItem value="48">48 (Default)</SelectItem>
-                        <SelectItem value="56">56 (Large)</SelectItem>
-                        <SelectItem value="64">64 (XL)</SelectItem>
-                        <SelectItem value="72">72 (XXL)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Position</Label>
-                    <Select value={hookPosition} onValueChange={setHookPosition} disabled={isUploading}>
-                      <SelectTrigger data-testid="select-hook-position" className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="top">Top</SelectItem>
-                        <SelectItem value="center">Center</SelectItem>
-                        <SelectItem value="bottom">Bottom</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="seo-toggle" className="text-sm font-medium">SEO Keywords & Hashtags</Label>
+                <p className="text-xs text-muted-foreground">Generate AI hashtags and SEO keywords (copy-paste ready)</p>
+              </div>
+              <Switch
+                id="seo-toggle"
+                data-testid="switch-seo"
+                checked={seoEnabled}
+                onCheckedChange={setSeoEnabled}
+                disabled={isUploading}
+              />
+            </div>
 
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Font Color</Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        data-testid="input-hook-font-color"
-                        value={hookFontColor}
-                        onChange={(e) => setHookFontColor(e.target.value)}
-                        disabled={isUploading}
-                        className="w-8 h-8 rounded border cursor-pointer"
-                      />
-                      <span className="text-xs text-muted-foreground">{hookFontColor}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Stroke Color</Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        data-testid="input-hook-stroke-color"
-                        value={hookStrokeColor}
-                        onChange={(e) => setHookStrokeColor(e.target.value)}
-                        disabled={isUploading}
-                        className="w-8 h-8 rounded border cursor-pointer"
-                      />
-                      <span className="text-xs text-muted-foreground">{hookStrokeColor}</span>
-                    </div>
-                  </div>
+            {seoEnabled && (
+              <div className="space-y-2 pl-4 border-l-2 border-muted">
+                <Label htmlFor="seo-prompt">SEO Prompt</Label>
+                <Textarea
+                  id="seo-prompt"
+                  data-testid="input-seo-prompt"
+                  placeholder="e.g. 'Focus on Filipino market keywords and trending hashtags'"
+                  value={seoPrompt}
+                  onChange={(e) => setSeoPrompt(e.target.value)}
+                  rows={2}
+                  disabled={isUploading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Custom prompt for SEO focus. Leave empty for default hashtags and keywords.
+                </p>
+                <div className="space-y-1 mt-2">
+                  <Label className="text-xs">SEO Model</Label>
+                  <Select value={seoModel} onValueChange={setSeoModel} disabled={isUploading}>
+                    <SelectTrigger data-testid="select-seo-model" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPENAI_MODELS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             )}

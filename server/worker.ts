@@ -270,115 +270,50 @@ async function generateHookHeadline(personaPrompt: string, hookPrompt: string | 
   return response.choices[0]?.message?.content?.trim() || "MUST WATCH!";
 }
 
-async function overlayHookHeadline(
-  videoBuffer: Buffer,
-  headline: string,
-  workDir: string,
-  fontOptions?: { fontSize?: number; fontColor?: string; strokeColor?: string; position?: string; effect?: string }
-): Promise<Buffer> {
-  const videoPath = join(workDir, "video_for_hook.mp4");
-  const textPath = join(workDir, "hook_headline.txt");
-  const headPath = join(workDir, "hook_head.mp4");
-  const headTextPath = join(workDir, "hook_head_text.mp4");
-  const tailPath = join(workDir, "hook_tail.mp4");
-  const concatListPath = join(workDir, "hook_concat.txt");
-  const outputPath = join(workDir, "video_hooked.mp4");
+async function generateCaption(personaPrompt: string, captionPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are a social media caption writer. Generate an engaging, scroll-stopping caption in Taglish (Tagalog-English mix) for a product post. Include relevant emojis. The caption should be ready to copy-paste directly to social media (Facebook, Instagram, TikTok). Output ONLY the caption text, nothing else. If a product image is provided, use the visible product details, branding, and features to make the caption specific and compelling.`;
 
-  await writeFile(videoPath, videoBuffer);
-  await writeFile(textPath, headline, "utf-8");
+  const textMsg = captionPrompt
+    ? `Product context: ${personaPrompt}\n\nCaption instruction: ${captionPrompt}`
+    : `Generate a social media caption for this product: ${personaPrompt}`;
 
-  const escapedTextPath = textPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+  const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+  if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
+  userContent.push({ type: "text", text: textMsg });
 
-  const fontSize = fontOptions?.fontSize || 48;
-  const fontColor = (fontOptions?.fontColor || "#FFFFFF").replace("#", "0x");
-  const strokeColor = (fontOptions?.strokeColor || "#000000").replace("#", "0x");
-  const position = fontOptions?.position || "center";
-  const effect = fontOptions?.effect || "border";
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: 500,
+    messages: [
+      { role: "system", content: systemMsg },
+      { role: "user", content: userContent as any },
+    ],
+  });
 
-  let yExpr: string;
-  switch (position) {
-    case "top": yExpr = "h*0.12"; break;
-    case "bottom": yExpr = "h-text_h-h*0.12"; break;
-    default: yExpr = "(h-text_h)/2"; break;
-  }
+  return response.choices[0]?.message?.content?.trim() || "";
+}
 
-  const baseParams = `textfile='${escapedTextPath}':fontsize=${fontSize}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${yExpr}:font=FreeSans`;
+async function generateSeoKeywords(personaPrompt: string, seoPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are an SEO and social media keyword specialist. Generate relevant hashtags and SEO keywords for a product post. Output a mix of popular and niche hashtags (15-25 hashtags) plus 5-10 SEO keywords. Format: hashtags on the first section (each starting with #), then SEO keywords below. Make them ready to copy-paste. If a product image is provided, use the visible product details and features. Use Taglish and English tags for maximum reach.`;
 
-  let effectParams: string;
-  switch (effect) {
-    case "shadow":
-      effectParams = `${baseParams}:shadowcolor=${strokeColor}@0.7:shadowx=3:shadowy=3`;
-      break;
-    case "glow":
-      effectParams = `${baseParams}:borderw=5:bordercolor=${strokeColor}@0.6:shadowcolor=${fontColor}@0.5:shadowx=2:shadowy=2`;
-      break;
-    case "none":
-      effectParams = baseParams;
-      break;
-    default:
-      effectParams = `${baseParams}:borderw=3:bordercolor=${strokeColor}`;
-      break;
-  }
+  const textMsg = seoPrompt
+    ? `Product context: ${personaPrompt}\n\nSEO instruction: ${seoPrompt}`
+    : `Generate hashtags and SEO keywords for this product: ${personaPrompt}`;
 
-  const HOOK_DURATION = 5;
+  const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+  if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
+  userContent.push({ type: "text", text: textMsg });
 
-  try {
-    await runFfmpeg([
-      "-i", videoPath,
-      "-t", String(HOOK_DURATION),
-      "-c", "copy",
-      "-y",
-      headPath,
-    ], 60_000);
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: 500,
+    messages: [
+      { role: "system", content: systemMsg },
+      { role: "user", content: userContent as any },
+    ],
+  });
 
-    await runFfmpeg([
-      "-i", headPath,
-      "-vf", `drawtext=${effectParams}`,
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-crf", "18",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "copy",
-      "-y",
-      headTextPath,
-    ], 180_000);
-
-    await runFfmpeg([
-      "-i", videoPath,
-      "-ss", String(HOOK_DURATION),
-      "-c", "copy",
-      "-y",
-      tailPath,
-    ], 60_000);
-
-    await writeFile(concatListPath, `file '${headTextPath}'\nfile '${tailPath}'\n`);
-
-    await runFfmpeg([
-      "-f", "concat",
-      "-safe", "0",
-      "-i", concatListPath,
-      "-c", "copy",
-      "-movflags", "+faststart",
-      "-y",
-      outputPath,
-    ], 120_000);
-
-    return readFile(outputPath);
-  } catch (splitErr: any) {
-    console.warn(`[worker] Split overlay failed (${splitErr.message}), falling back to full re-encode...`);
-    await runFfmpeg([
-      "-i", videoPath,
-      "-vf", `drawtext=${effectParams}`,
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "copy",
-      "-y",
-      outputPath,
-    ], 600_000);
-    return readFile(outputPath);
-  }
+  return response.choices[0]?.message?.content?.trim() || "";
 }
 
 async function processJob(jobId: number): Promise<void> {
@@ -565,18 +500,32 @@ async function processJob(jobId: number): Promise<void> {
       await storage.appendJobLog(jobId, "Generating hook headline via AI...");
       try {
         const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
-        await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
-        await storage.appendJobLog(jobId, "Overlaying hook headline on video...");
-        finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir, {
-          fontSize: asset.hookFontSize,
-          fontColor: asset.hookFontColor,
-          strokeColor: asset.hookStrokeColor,
-          position: asset.hookPosition,
-          effect: asset.hookEffect,
-        });
-        await storage.appendJobLog(jobId, "Hook headline added successfully");
+        await storage.updateJob(jobId, { headlineText: headline });
+        await storage.appendJobLog(jobId, `Hook headline generated: "${headline}"`);
       } catch (err: any) {
-        await storage.appendJobLog(jobId, `Warning: Hook headline failed: ${err.message}. Continuing without hook.`);
+        await storage.appendJobLog(jobId, `Warning: Headline generation failed: ${err.message}`);
+      }
+    }
+
+    if (asset.captionEnabled) {
+      await storage.appendJobLog(jobId, "Generating social media caption via AI...");
+      try {
+        const caption = await generateCaption(asset.personaPrompt, asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
+        await storage.updateJob(jobId, { captionText: caption });
+        await storage.appendJobLog(jobId, "Caption generated successfully");
+      } catch (err: any) {
+        await storage.appendJobLog(jobId, `Warning: Caption generation failed: ${err.message}`);
+      }
+    }
+
+    if (asset.seoEnabled) {
+      await storage.appendJobLog(jobId, "Generating SEO keywords & hashtags via AI...");
+      try {
+        const seo = await generateSeoKeywords(asset.personaPrompt, asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
+        await storage.updateJob(jobId, { seoText: seo });
+        await storage.appendJobLog(jobId, "SEO keywords generated successfully");
+      } catch (err: any) {
+        await storage.appendJobLog(jobId, `Warning: SEO generation failed: ${err.message}`);
       }
     }
 

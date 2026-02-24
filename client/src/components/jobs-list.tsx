@@ -29,6 +29,9 @@ import {
   Trash2,
   Eye,
   X,
+  Sparkles,
+  MessageSquare,
+  Hash,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -37,6 +40,9 @@ type JobWithAsset = {
   assetId: number;
   status: string;
   scriptText: string | null;
+  headlineText: string | null;
+  captionText: string | null;
+  seoText: string | null;
   audioRawKey: string | null;
   audioCleanKey: string | null;
   finalVideoKey: string | null;
@@ -187,6 +193,31 @@ function VideoPreview({ jobId }: { jobId: number }) {
   );
 }
 
+function CopyTextButton({ text, label, jobId, field }: { text: string; label: string; jobId: number; field: string }) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast({ title: "Copied!", description: `${label} copied to clipboard.` });
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={handleCopy}
+      data-testid={`button-copy-${field}-${jobId}`}
+      className="gap-1.5"
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copied!" : `Copy ${label}`}
+    </Button>
+  );
+}
+
 export function JobsList() {
   const { toast } = useToast();
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -333,7 +364,7 @@ export function JobsList() {
         const StatusIcon = config.icon;
         const isActive = !["done", "failed"].includes(job.status);
         const isExpanded = expandedJobs.has(job.id);
-        const hasContent = job.scriptText || job.audioRawKey || job.audioCleanKey || job.logs;
+        const hasContent = job.scriptText || job.headlineText || job.captionText || job.seoText || job.audioRawKey || job.audioCleanKey || job.logs;
 
         return (
           <Card key={job.id}>
@@ -423,6 +454,60 @@ export function JobsList() {
                         data-testid={`text-script-${job.id}`}
                       >
                         {job.scriptText}
+                      </div>
+                    </div>
+                  )}
+
+                  {job.headlineText && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" />
+                          Hook Headline
+                        </h4>
+                        <CopyTextButton text={job.headlineText} label="Headline" jobId={job.id} field="headline" />
+                      </div>
+                      <div
+                        className="bg-muted rounded-md p-3 text-sm font-medium"
+                        data-testid={`text-headline-${job.id}`}
+                      >
+                        {job.headlineText}
+                      </div>
+                    </div>
+                  )}
+
+                  {job.captionText && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium flex items-center gap-1.5">
+                          <MessageSquare className="w-4 h-4" />
+                          Social Media Caption
+                        </h4>
+                        <CopyTextButton text={job.captionText} label="Caption" jobId={job.id} field="caption" />
+                      </div>
+                      <div
+                        className="bg-muted rounded-md p-3 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto"
+                        data-testid={`text-caption-${job.id}`}
+                      >
+                        {job.captionText}
+                      </div>
+                    </div>
+                  )}
+
+                  {job.seoText && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium flex items-center gap-1.5">
+                          <Hash className="w-4 h-4" />
+                          SEO Keywords & Hashtags
+                        </h4>
+                        <CopyTextButton text={job.seoText} label="SEO" jobId={job.id} field="seo" />
+                      </div>
+                      <div
+                        className="bg-muted rounded-md p-3 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto"
+                        data-testid={`text-seo-${job.id}`}
+                      >
+                        {job.seoText}
                       </div>
                     </div>
                   )}

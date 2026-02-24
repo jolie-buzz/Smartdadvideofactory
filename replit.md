@@ -53,9 +53,11 @@ shared/
    - Cut dead air via FFmpeg silenceremove filter
    - Combine video + cleaned audio + optional background music via FFmpeg (adjustable volumes)
    - If auto-captions enabled: transcribe via OpenAI Whisper → burn SRT subtitles via FFmpeg
-   - If hook headline enabled: generate headline via OpenAI (with product photo vision) → overlay text via FFmpeg drawtext
+   - If hook headline enabled: generate headline text via OpenAI (with product photo vision) → save as copyable text
+   - If caption enabled: generate social media caption via OpenAI (with product photo vision) → save as copyable text
+   - If SEO enabled: generate hashtags & keywords via OpenAI (with product photo vision) → save as copyable text
    - Upload all outputs to R2
-5. **Preview/Download/Share**: Video preview modal, signed URLs for private downloads, token-based sharing
+5. **Preview/Download/Share**: Video preview modal, signed URLs for private downloads, token-based sharing, copy buttons for headline/caption/SEO
 6. **Edit**: Setups are editable (name, prompt, voice, models, dead-air settings, volumes, captions, hook headline)
 
 ### Video Builder Templates
@@ -73,6 +75,7 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-24: Converted hook headline from video overlay to text-only output with copy button. Added Social Media Caption generator and SEO Keywords/Hashtags generator — each with own toggle, prompt, model selector, and copy button in job results. Removed FFmpeg headline overlay and font styling options.
 - 2026-02-24: Fixed hook headline timeout (600s + ultrafast preset for large videos), fixed download freeze (blob-based download with loading spinner instead of cross-origin a.click), added hookEffect selector (none/border/shadow/glow)
 - 2026-02-24: Hook headline now overlays full video duration (not just 3s), script prompt targets 45s voiceover (80-100 words), hookModel selector added, jobs deletable regardless of status
 - 2026-02-24: Fixed caption burning: installed libass/fontconfig/fonts, added FFmpeg timeout (180s captions, 120s hook), UTF-8 BOM for SRT, FontName=FreeSans

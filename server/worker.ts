@@ -237,12 +237,12 @@ async function burnCaptions(
   return readFile(outputPath);
 }
 
-async function generateHookHeadline(personaPrompt: string, hookPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
-  const systemMsg = `You are a social media hook headline generator. Generate a short, attention-grabbing headline (5-8 words max) in Taglish that makes viewers stop scrolling. Output ONLY the headline text, nothing else. If a product image is provided, use the visible product details, branding, and features from the image to craft a more specific and compelling headline.`;
+async function generateHookHeadline(hookPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are a social media hook headline generator. Generate a short, attention-grabbing headline (5-8 words max) in Taglish that makes viewers stop scrolling. Output ONLY the headline text, nothing else. You MUST analyze the product image provided to identify the product, its branding, features, and details — then craft a specific and compelling headline based on what you see in the image.`;
 
   const textMsg = hookPrompt
-    ? `Product context: ${personaPrompt}\n\nHook instruction: ${hookPrompt}`
-    : `Generate an unskippable hook headline for this product: ${personaPrompt}`;
+    ? `Hook instruction: ${hookPrompt}`
+    : `Generate an unskippable hook headline based on the product in the image.`;
 
   const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
@@ -270,12 +270,12 @@ async function generateHookHeadline(personaPrompt: string, hookPrompt: string | 
   return response.choices[0]?.message?.content?.trim() || "MUST WATCH!";
 }
 
-async function generateCaption(personaPrompt: string, captionPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
-  const systemMsg = `You are a social media caption writer. Generate an engaging, scroll-stopping caption in Taglish (Tagalog-English mix) for a product post. Include relevant emojis. The caption should be ready to copy-paste directly to social media (Facebook, Instagram, TikTok). Output ONLY the caption text, nothing else. If a product image is provided, use the visible product details, branding, and features to make the caption specific and compelling.`;
+async function generateCaption(captionPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are a social media caption writer. Generate an engaging, scroll-stopping caption in Taglish (Tagalog-English mix) for a product post. Include relevant emojis. The caption should be ready to copy-paste directly to social media (Facebook, Instagram, TikTok). Output ONLY the caption text, nothing else. You MUST analyze the product image provided to identify the product, its branding, features, and details — then write a specific and compelling caption based on what you see in the image.`;
 
   const textMsg = captionPrompt
-    ? `Product context: ${personaPrompt}\n\nCaption instruction: ${captionPrompt}`
-    : `Generate a social media caption for this product: ${personaPrompt}`;
+    ? `Caption instruction: ${captionPrompt}`
+    : `Generate a social media caption based on the product in the image.`;
 
   const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
   if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
@@ -293,12 +293,12 @@ async function generateCaption(personaPrompt: string, captionPrompt: string | nu
   return response.choices[0]?.message?.content?.trim() || "";
 }
 
-async function generateSeoKeywords(personaPrompt: string, seoPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
-  const systemMsg = `You are an SEO and social media keyword specialist. Generate relevant hashtags and SEO keywords for a product post. Output a mix of popular and niche hashtags (15-25 hashtags) plus 5-10 SEO keywords. Format: hashtags on the first section (each starting with #), then SEO keywords below. Make them ready to copy-paste. If a product image is provided, use the visible product details and features. Use Taglish and English tags for maximum reach.`;
+async function generateSeoKeywords(seoPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are an SEO and social media keyword specialist. Generate relevant hashtags and SEO keywords for a product post. Output a mix of popular and niche hashtags (15-25 hashtags) plus 5-10 SEO keywords. Format: hashtags on the first section (each starting with #), then SEO keywords below. Make them ready to copy-paste. You MUST analyze the product image provided to identify the product, its branding, features, and details — then generate hashtags and keywords based on what you see in the image. Use Taglish and English tags for maximum reach.`;
 
   const textMsg = seoPrompt
-    ? `Product context: ${personaPrompt}\n\nSEO instruction: ${seoPrompt}`
-    : `Generate hashtags and SEO keywords for this product: ${personaPrompt}`;
+    ? `SEO instruction: ${seoPrompt}`
+    : `Generate hashtags and SEO keywords based on the product in the image.`;
 
   const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
   if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
@@ -499,7 +499,7 @@ async function processJob(jobId: number): Promise<void> {
     if (asset.hookHeadline) {
       await storage.appendJobLog(jobId, "Generating hook headline via AI...");
       try {
-        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
+        const headline = await generateHookHeadline(asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
         await storage.updateJob(jobId, { headlineText: headline });
         await storage.appendJobLog(jobId, `Hook headline generated: "${headline}"`);
       } catch (err: any) {
@@ -510,7 +510,7 @@ async function processJob(jobId: number): Promise<void> {
     if (asset.captionEnabled) {
       await storage.appendJobLog(jobId, "Generating social media caption via AI...");
       try {
-        const caption = await generateCaption(asset.personaPrompt, asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
+        const caption = await generateCaption(asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
         await storage.updateJob(jobId, { captionText: caption });
         await storage.appendJobLog(jobId, "Caption generated successfully");
       } catch (err: any) {
@@ -521,7 +521,7 @@ async function processJob(jobId: number): Promise<void> {
     if (asset.seoEnabled) {
       await storage.appendJobLog(jobId, "Generating SEO keywords & hashtags via AI...");
       try {
-        const seo = await generateSeoKeywords(asset.personaPrompt, asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
+        const seo = await generateSeoKeywords(asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
         await storage.updateJob(jobId, { seoText: seo });
         await storage.appendJobLog(jobId, "SEO keywords generated successfully");
       } catch (err: any) {

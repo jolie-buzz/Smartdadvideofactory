@@ -15,6 +15,13 @@ const openai = new OpenAI(
       }
 );
 
+const openaiDirect = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 async function generateScript(personaPrompt: string, photoUrl: string | null, model: string): Promise<string> {
@@ -125,7 +132,10 @@ async function cutDeadAir(
 async function combineVideoAudio(
   videoBuffer: Buffer,
   audioBuffer: Buffer,
-  workDir: string
+  workDir: string,
+  musicBuffer?: Buffer | null,
+  voiceVolume: number = 1.0,
+  musicVolume: number = 0.3
 ): Promise<Buffer> {
   const videoPath = join(workDir, "input_video.mp4");
   const audioPath = join(workDir, "voice_clean.mp3");
@@ -134,14 +144,117 @@ async function combineVideoAudio(
   await writeFile(videoPath, videoBuffer);
   await writeFile(audioPath, audioBuffer);
 
+  if (musicBuffer) {
+    const musicPath = join(workDir, "music.mp3");
+    await writeFile(musicPath, musicBuffer);
+
+    await runFfmpeg([
+      "-i", videoPath,
+      "-i", audioPath,
+      "-i", musicPath,
+      "-filter_complex",
+      `[1:a]volume=${voiceVolume}[voice];[2:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop];[voice][musicloop]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+      "-map", "0:v:0",
+      "-map", "[aout]",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-shortest",
+      "-y",
+      outputPath,
+    ]);
+  } else {
+    await runFfmpeg([
+      "-i", videoPath,
+      "-i", audioPath,
+      "-filter_complex",
+      `[1:a]volume=${voiceVolume}[aout]`,
+      "-map", "0:v:0",
+      "-map", "[aout]",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-shortest",
+      "-y",
+      outputPath,
+    ]);
+  }
+
+  return readFile(outputPath);
+}
+
+async function transcribeAudio(audioBuffer: Buffer, workDir: string): Promise<string> {
+  const audioPath = join(workDir, "voice_for_srt.mp3");
+  await writeFile(audioPath, audioBuffer);
+
+  const fs = await import("fs");
+  const transcription = await openaiDirect.audio.transcriptions.create({
+    file: fs.createReadStream(audioPath) as any,
+    model: "whisper-1",
+    response_format: "srt",
+  });
+
+  return transcription as unknown as string;
+}
+
+async function burnCaptions(
+  videoBuffer: Buffer,
+  srtContent: string,
+  workDir: string
+): Promise<Buffer> {
+  const videoPath = join(workDir, "video_for_captions.mp4");
+  const srtPath = join(workDir, "captions.srt");
+  const outputPath = join(workDir, "video_captioned.mp4");
+
+  await writeFile(videoPath, videoBuffer);
+  await writeFile(srtPath, srtContent);
+
+  const escapedSrtPath = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+
   await runFfmpeg([
     "-i", videoPath,
-    "-i", audioPath,
-    "-c:v", "copy",
-    "-c:a", "aac",
-    "-map", "0:v:0",
-    "-map", "1:a:0",
-    "-shortest",
+    "-vf", `subtitles='${escapedSrtPath}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=30'`,
+    "-c:a", "copy",
+    "-y",
+    outputPath,
+  ]);
+
+  return readFile(outputPath);
+}
+
+async function generateHookHeadline(personaPrompt: string, hookPrompt: string | null, model: string): Promise<string> {
+  const systemMsg = `You are a social media hook headline generator. Generate a short, attention-grabbing headline (5-8 words max) in Taglish that makes viewers stop scrolling. Output ONLY the headline text, nothing else.`;
+
+  const userMsg = hookPrompt
+    ? `Product context: ${personaPrompt}\n\nHook instruction: ${hookPrompt}`
+    : `Generate an unskippable hook headline for this product: ${personaPrompt}`;
+
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: 100,
+    messages: [
+      { role: "system", content: systemMsg },
+      { role: "user", content: userMsg },
+    ],
+  });
+
+  return response.choices[0]?.message?.content?.trim() || "MUST WATCH!";
+}
+
+async function overlayHookHeadline(
+  videoBuffer: Buffer,
+  headline: string,
+  workDir: string
+): Promise<Buffer> {
+  const videoPath = join(workDir, "video_for_hook.mp4");
+  const outputPath = join(workDir, "video_hooked.mp4");
+
+  await writeFile(videoPath, videoBuffer);
+
+  const escapedHeadline = headline.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+
+  await runFfmpeg([
+    "-i", videoPath,
+    "-vf", `drawtext=text='${escapedHeadline}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,0,3)'`,
+    "-c:a", "copy",
     "-y",
     outputPath,
   ]);
@@ -210,9 +323,42 @@ async function processJob(jobId: number): Promise<void> {
     await storage.appendJobLog(jobId, "Downloading video from R2...");
 
     const videoBuffer = await downloadFromR2(asset.videoKey);
-    await storage.appendJobLog(jobId, "Combining video + clean audio...");
 
-    const finalVideoBuffer = await combineVideoAudio(videoBuffer, audioCleanBuffer, workDir);
+    let musicBuffer: Buffer | null = null;
+    if (asset.musicKey) {
+      await storage.appendJobLog(jobId, "Downloading background music from R2...");
+      musicBuffer = await downloadFromR2(asset.musicKey);
+      await storage.appendJobLog(jobId, `Music downloaded (${(musicBuffer.length / 1024).toFixed(1)} KB)`);
+    }
+
+    await storage.appendJobLog(jobId, `Combining video + audio (voice vol: ${asset.voiceVolume}, music vol: ${asset.musicVolume})...`);
+    let finalVideoBuffer = await combineVideoAudio(videoBuffer, audioCleanBuffer, workDir, musicBuffer, asset.voiceVolume, asset.musicVolume);
+
+    if (asset.autoCaptions) {
+      await storage.appendJobLog(jobId, "Generating captions via AI transcription...");
+      try {
+        const srtContent = await transcribeAudio(audioCleanBuffer, workDir);
+        await storage.appendJobLog(jobId, "Burning captions into video...");
+        finalVideoBuffer = await burnCaptions(finalVideoBuffer, srtContent, workDir);
+        await storage.appendJobLog(jobId, "Captions added successfully");
+      } catch (err: any) {
+        await storage.appendJobLog(jobId, `Warning: Caption generation failed: ${err.message}. Continuing without captions.`);
+      }
+    }
+
+    if (asset.hookHeadline) {
+      await storage.appendJobLog(jobId, "Generating hook headline via AI...");
+      try {
+        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, asset.openaiModel);
+        await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
+        await storage.appendJobLog(jobId, "Overlaying hook headline on video...");
+        finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir);
+        await storage.appendJobLog(jobId, "Hook headline added successfully");
+      } catch (err: any) {
+        await storage.appendJobLog(jobId, `Warning: Hook headline failed: ${err.message}. Continuing without hook.`);
+      }
+    }
+
     const finalVideoKey = `jobs/${jobId}/final.mp4`;
     await uploadToR2(finalVideoKey, finalVideoBuffer, "video/mp4");
     await storage.updateJob(jobId, { finalVideoKey, status: "done" });

@@ -17,6 +17,12 @@ export const assets = pgTable("assets", {
   thresholdDb: real("threshold_db").notNull().default(-35),
   removeSilencesLongerThan: real("remove_silences_longer_than").notNull().default(0.2),
   ignoreDetectionsShorterThan: real("ignore_detections_shorter_than").notNull().default(0.75),
+  musicKey: text("music_key"),
+  voiceVolume: real("voice_volume").notNull().default(1.0),
+  musicVolume: real("music_volume").notNull().default(0.3),
+  autoCaptions: boolean("auto_captions").notNull().default(false),
+  hookHeadline: boolean("hook_headline").notNull().default(false),
+  hookPrompt: text("hook_prompt"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

@@ -27,6 +27,8 @@ import {
   ChevronUp,
   Play,
   Trash2,
+  Eye,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -107,6 +109,80 @@ function AudioPlayer({ jobId, type, label }: { jobId: number; type: "raw" | "cle
         <source src={audioUrl} type="audio/mpeg" />
       </audio>
     </div>
+  );
+}
+
+function VideoPreview({ jobId }: { jobId: number }) {
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const loadPreview = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/preview`);
+      if (!res.ok) throw new Error("Failed to load preview");
+      const data = await res.json();
+      setVideoUrl(data.url);
+      setOpen(true);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (error) {
+    return <span className="text-xs text-destructive">{error}</span>;
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={loadPreview}
+        disabled={loading}
+        data-testid={`button-preview-${jobId}`}
+      >
+        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Eye className="w-4 h-4 mr-1" />}
+        Preview
+      </Button>
+      {open && videoUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setOpen(false)}
+          data-testid={`modal-preview-${jobId}`}
+        >
+          <div
+            className="relative bg-background rounded-lg shadow-lg max-w-3xl w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button
+              size="icon"
+              variant="ghost"
+              className="absolute top-2 right-2 z-10"
+              onClick={() => setOpen(false)}
+              data-testid={`button-close-preview-${jobId}`}
+            >
+              <X className="w-5 h-5" />
+            </Button>
+            <div className="p-4">
+              <video
+                controls
+                autoPlay
+                className="w-full rounded"
+                data-testid={`video-preview-${jobId}`}
+              >
+                <source src={videoUrl} type="video/mp4" />
+              </video>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -277,15 +353,18 @@ export function JobsList() {
 
                 <div className="flex items-center gap-1 shrink-0">
                   {job.status === "done" && job.finalVideoKey && (
-                    <Button
-                      size="sm"
-                      onClick={() => downloadMutation.mutate({ jobId: job.id, type: "final" })}
-                      disabled={downloadMutation.isPending}
-                      data-testid={`button-download-${job.id}`}
-                    >
-                      <Download className="w-4 h-4 mr-1" />
-                      Video
-                    </Button>
+                    <>
+                      <VideoPreview jobId={job.id} />
+                      <Button
+                        size="sm"
+                        onClick={() => downloadMutation.mutate({ jobId: job.id, type: "final" })}
+                        disabled={downloadMutation.isPending}
+                        data-testid={`button-download-${job.id}`}
+                      >
+                        <Download className="w-4 h-4 mr-1" />
+                        Video
+                      </Button>
+                    </>
                   )}
 
                   {hasContent && (

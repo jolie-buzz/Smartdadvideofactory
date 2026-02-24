@@ -36,7 +36,7 @@ export async function registerRoutes(
       if (!type || !assetId || !filename || !contentType) {
         return res.status(400).json({ error: "type, assetId, filename, and contentType are required" });
       }
-      const ext = filename.split(".").pop()?.toLowerCase() || (type === "photo" ? "jpg" : "mp4");
+      const ext = filename.split(".").pop()?.toLowerCase() || (type === "photo" ? "jpg" : type === "music" ? "mp3" : "mp4");
       const key = `assets/${assetId}/${type}.${ext}`;
       const url = await getSignedUploadUrl(key, contentType);
       res.json({ url, key });
@@ -86,7 +86,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
 
       if (!photoKey || !videoKey) {
         return res.status(400).json({ error: "Both photoKey and videoKey are required. Upload files first." });
@@ -105,6 +105,12 @@ export async function registerRoutes(
         thresholdDb: typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb) || -35,
         removeSilencesLongerThan: typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan) || 0.2,
         ignoreDetectionsShorterThan: typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan) || 0.75,
+        musicKey: musicKey || null,
+        voiceVolume: typeof voiceVolume === "number" ? voiceVolume : 1.0,
+        musicVolume: typeof musicVolume === "number" ? musicVolume : 0.3,
+        autoCaptions: autoCaptions || false,
+        hookHeadline: hookHeadline || false,
+        hookPrompt: hookPrompt || null,
       });
 
       res.status(201).json(asset);
@@ -139,7 +145,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
@@ -151,6 +157,12 @@ export async function registerRoutes(
       if (thresholdDb !== undefined) updateData.thresholdDb = typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb);
       if (removeSilencesLongerThan !== undefined) updateData.removeSilencesLongerThan = typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan);
       if (ignoreDetectionsShorterThan !== undefined) updateData.ignoreDetectionsShorterThan = typeof ignoreDetectionsShorterThan === "number" ? ignoreDetectionsShorterThan : parseFloat(ignoreDetectionsShorterThan);
+      if (musicKey !== undefined) updateData.musicKey = musicKey;
+      if (voiceVolume !== undefined) updateData.voiceVolume = typeof voiceVolume === "number" ? voiceVolume : parseFloat(voiceVolume);
+      if (musicVolume !== undefined) updateData.musicVolume = typeof musicVolume === "number" ? musicVolume : parseFloat(musicVolume);
+      if (autoCaptions !== undefined) updateData.autoCaptions = autoCaptions;
+      if (hookHeadline !== undefined) updateData.hookHeadline = hookHeadline;
+      if (hookPrompt !== undefined) updateData.hookPrompt = hookPrompt;
 
       const updated = await storage.updateAsset(id, updateData);
       res.json(updated);
@@ -277,6 +289,18 @@ export async function registerRoutes(
       if (!job) return res.status(404).json({ error: "Job not found" });
       await storage.deleteJob(job.id);
       res.status(204).send();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/jobs/:id/preview", async (req, res) => {
+    try {
+      const job = await storage.getJob(parseInt(req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      if (!job.finalVideoKey) return res.status(400).json({ error: "Final video not yet available" });
+      const url = await getSignedDownloadUrl(job.finalVideoKey);
+      res.json({ url });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

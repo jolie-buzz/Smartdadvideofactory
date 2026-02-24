@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles } from "lucide-react";
 import type { Asset } from "@shared/schema";
 
 interface Voice {
@@ -39,10 +39,11 @@ const OPENAI_MODELS = [
 
 async function uploadFileWithProgress(
   file: File,
-  type: "photo" | "video",
+  type: "photo" | "video" | "music",
   assetId: string,
   onProgress: (percent: number) => void
 ): Promise<{ key: string; assetId: string }> {
+  const defaultMime = type === "photo" ? "image/jpeg" : type === "music" ? "audio/mpeg" : "video/mp4";
   const res = await fetch("/api/upload-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -50,7 +51,7 @@ async function uploadFileWithProgress(
       type,
       assetId,
       filename: file.name,
-      contentType: file.type || (type === "photo" ? "image/jpeg" : "video/mp4"),
+      contentType: file.type || defaultMime,
     }),
   });
 
@@ -64,7 +65,7 @@ async function uploadFileWithProgress(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type || (type === "photo" ? "image/jpeg" : "video/mp4"));
+    xhr.setRequestHeader("Content-Type", file.type || defaultMime);
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
@@ -93,7 +94,7 @@ async function uploadFileWithProgress(
   });
 }
 
-type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "saving" | "done";
+type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "saving" | "done";
 
 interface SetupFormProps {
   onComplete: () => void;
@@ -115,10 +116,17 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [thresholdDb, setThresholdDb] = useState(-35);
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
+  const [music, setMusic] = useState<File | null>(null);
+  const [voiceVolume, setVoiceVolume] = useState(1.0);
+  const [musicVolume, setMusicVolume] = useState(0.3);
+  const [autoCaptions, setAutoCaptions] = useState(false);
+  const [hookHeadline, setHookHeadline] = useState(false);
+  const [hookPrompt, setHookPrompt] = useState("");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const musicInputRef = useRef<HTMLInputElement>(null);
 
   const isEditing = !!editingAsset;
   const isUploading = uploadStep !== "idle" && uploadStep !== "done";
@@ -135,8 +143,14 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setThresholdDb(editingAsset.thresholdDb);
       setRemoveSilencesLongerThan(editingAsset.removeSilencesLongerThan);
       setIgnoreDetectionsShorterThan(editingAsset.ignoreDetectionsShorterThan);
+      setVoiceVolume(editingAsset.voiceVolume ?? 1.0);
+      setMusicVolume(editingAsset.musicVolume ?? 0.3);
+      setAutoCaptions(editingAsset.autoCaptions ?? false);
+      setHookHeadline(editingAsset.hookHeadline ?? false);
+      setHookPrompt(editingAsset.hookPrompt || "");
       setPhoto(null);
       setVideo(null);
+      setMusic(null);
     }
   }, [editingAsset]);
 
@@ -158,6 +172,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           body: JSON.stringify({
             name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
+            voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
           }),
         });
         if (!res.ok) {
@@ -200,6 +215,14 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setUploadProgress(0);
       const videoResult = await uploadFileWithProgress(video, "video", assetId, setUploadProgress);
 
+      let musicKeyValue: string | null = null;
+      if (music) {
+        setUploadStep("uploading-music");
+        setUploadProgress(0);
+        const musicResult = await uploadFileWithProgress(music, "music", assetId, setUploadProgress);
+        musicKeyValue = musicResult.key;
+      }
+
       setUploadStep("saving");
       const res = await fetch("/api/setup", {
         method: "POST",
@@ -208,6 +231,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           name, photoKey: photoResult.key, videoKey: videoResult.key,
           personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
+          musicKey: musicKeyValue, voiceVolume, musicVolume,
+          autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
         }),
       });
 
@@ -224,13 +249,20 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setPersonaPrompt("");
       setPhoto(null);
       setVideo(null);
+      setMusic(null);
       setVoiceId("");
       setVoiceName("");
       setOpenaiModel("gpt-4o");
       setElevenlabsModel("eleven_multilingual_v2");
       setUseEnhance(true);
+      setVoiceVolume(1.0);
+      setMusicVolume(0.3);
+      setAutoCaptions(false);
+      setHookHeadline(false);
+      setHookPrompt("");
       if (photoInputRef.current) photoInputRef.current.value = "";
       if (videoInputRef.current) videoInputRef.current.value = "";
+      if (musicInputRef.current) musicInputRef.current.value = "";
       onComplete();
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to save setup", variant: "destructive" });
@@ -264,6 +296,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     ? "Uploading photo..."
     : uploadStep === "uploading-video"
     ? "Uploading video..."
+    : uploadStep === "uploading-music"
+    ? "Uploading music..."
     : uploadStep === "saving"
     ? "Saving..."
     : "";
@@ -523,6 +557,127 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             </div>
           </div>
 
+          <Separator />
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Music className="w-4 h-4" />
+              Background Music (Optional)
+            </h3>
+
+            {!isEditing && (
+              <div className="space-y-2">
+                <Label htmlFor="music-upload">Music Track</Label>
+                <Input
+                  ref={musicInputRef}
+                  id="music-upload"
+                  data-testid="input-music"
+                  type="file"
+                  accept="audio/*"
+                  onChange={(e) => setMusic(e.target.files?.[0] || null)}
+                  disabled={isUploading}
+                  className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                />
+                {music && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Music className="w-3 h-3" />
+                    {music.name} ({(music.size / 1024).toFixed(0)} KB)
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Upload an MP3 or audio file to mix as background music in the final video.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <Label>Voiceover Volume</Label>
+                <span className="text-sm text-muted-foreground">{Math.round(voiceVolume * 100)}%</span>
+              </div>
+              <Slider
+                data-testid="slider-voice-volume"
+                value={[voiceVolume]}
+                onValueChange={([v]) => setVoiceVolume(v)}
+                min={0}
+                max={1.5}
+                step={0.05}
+                disabled={isUploading}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <Label>Music Volume</Label>
+                <span className="text-sm text-muted-foreground">{Math.round(musicVolume * 100)}%</span>
+              </div>
+              <Slider
+                data-testid="slider-music-volume"
+                value={[musicVolume]}
+                onValueChange={([v]) => setMusicVolume(v)}
+                min={0}
+                max={1.0}
+                step={0.05}
+                disabled={isUploading}
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              Advanced Features
+            </h3>
+
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="autocaptions-toggle" className="text-sm font-medium">Auto Captions</Label>
+                <p className="text-xs text-muted-foreground">Automatically burn captions into the final video using AI transcription</p>
+              </div>
+              <Switch
+                id="autocaptions-toggle"
+                data-testid="switch-auto-captions"
+                checked={autoCaptions}
+                onCheckedChange={setAutoCaptions}
+                disabled={isUploading}
+              />
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="hookheadline-toggle" className="text-sm font-medium">Hook Headline</Label>
+                <p className="text-xs text-muted-foreground">Add an AI-generated hook headline overlay at the start of the video</p>
+              </div>
+              <Switch
+                id="hookheadline-toggle"
+                data-testid="switch-hook-headline"
+                checked={hookHeadline}
+                onCheckedChange={setHookHeadline}
+                disabled={isUploading}
+              />
+            </div>
+
+            {hookHeadline && (
+              <div className="space-y-2">
+                <Label htmlFor="hook-prompt">Hook Headline Prompt</Label>
+                <Textarea
+                  id="hook-prompt"
+                  data-testid="input-hook-prompt"
+                  placeholder="e.g. 'Create a 5-7 word attention-grabbing headline about this product that makes people stop scrolling'"
+                  value={hookPrompt}
+                  onChange={(e) => setHookPrompt(e.target.value)}
+                  rows={3}
+                  disabled={isUploading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Custom prompt for generating the hook headline. Leave empty for a default hook.
+                </p>
+              </div>
+            )}
+          </div>
+
           {!canSave && !isUploading && missingFields.length > 0 && (
             <p className="text-sm text-destructive" data-testid="text-validation-hint">
               Please fill in: {missingFields.join(", ")}
@@ -546,7 +701,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
                   {uploadStep === "uploading-video" && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {uploadStep === "saving" && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                  {(uploadStep === "uploading-music" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
                   {uploadStep === "uploading-photo" && <span className="w-3 h-3" />}
                   <span className={uploadStep === "uploading-video" ? "font-medium" : "text-muted-foreground"}>
                     Upload video
@@ -556,9 +711,24 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 {uploadStep === "uploading-video" && <Progress value={uploadProgress} className="h-2" />}
               </div>
 
+              {music && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    {uploadStep === "uploading-music" && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {uploadStep === "saving" && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                    {(uploadStep === "uploading-photo" || uploadStep === "uploading-video") && <span className="w-3 h-3" />}
+                    <span className={uploadStep === "uploading-music" ? "font-medium" : "text-muted-foreground"}>
+                      Upload music
+                    </span>
+                    {uploadStep === "uploading-music" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
+                  </div>
+                  {uploadStep === "uploading-music" && <Progress value={uploadProgress} className="h-2" />}
+                </div>
+              )}
+
               <div className="flex items-center gap-2 text-sm">
                 {uploadStep === "saving" && <Loader2 className="w-3 h-3 animate-spin" />}
-                {(uploadStep === "uploading-photo" || uploadStep === "uploading-video") && <span className="w-3 h-3" />}
+                {(uploadStep === "uploading-photo" || uploadStep === "uploading-video" || uploadStep === "uploading-music") && <span className="w-3 h-3" />}
                 <span className={uploadStep === "saving" ? "font-medium" : "text-muted-foreground"}>
                   Save setup
                 </span>

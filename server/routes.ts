@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2 } from "./r2";
+import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2 } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
 import multer from "multer";
@@ -386,6 +386,73 @@ export async function registerRoutes(
       res.redirect(url);
     } catch (err: any) {
       res.status(500).send("Error generating download link.");
+    }
+  });
+
+  app.post("/api/convert-music", async (req, res) => {
+    try {
+      const { r2Key } = req.body;
+      if (!r2Key) {
+        return res.status(400).json({ error: "r2Key is required" });
+      }
+
+      if (!r2Key.startsWith("assets/") || !r2Key.includes("/music.")) {
+        return res.status(400).json({ error: "Invalid key: only music files under assets/ can be converted" });
+      }
+
+      const videoExts = ["mp4", "mov", "avi", "webm", "mkv", "m4v", "flv", "wmv"];
+      const ext = r2Key.split(".").pop()?.toLowerCase() || "";
+      if (!videoExts.includes(ext)) {
+        return res.status(400).json({ error: "File does not appear to be a video format" });
+      }
+
+      const workDir = path.join(os.tmpdir(), `music-convert-${Date.now()}`);
+      fs.mkdirSync(workDir, { recursive: true });
+
+      const inputPath = path.join(workDir, `input.${ext}`);
+      const outputPath = path.join(workDir, "output.mp3");
+
+      const fileBuffer = await downloadFromR2(r2Key);
+
+      const maxSizeMB = 200;
+      if (fileBuffer.length > maxSizeMB * 1024 * 1024) {
+        return res.status(400).json({ error: `File too large (${(fileBuffer.length / 1024 / 1024).toFixed(0)} MB). Max is ${maxSizeMB} MB.` });
+      }
+
+      fs.writeFileSync(inputPath, fileBuffer);
+
+      await new Promise<void>((resolve, reject) => {
+        const { spawn } = require("child_process");
+        const ffmpeg = spawn("ffmpeg", [
+          "-i", inputPath,
+          "-vn",
+          "-acodec", "libmp3lame",
+          "-ab", "192k",
+          "-ar", "44100",
+          "-y",
+          outputPath,
+        ]);
+        let stderr = "";
+        ffmpeg.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+        ffmpeg.on("close", (code: number) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
+        });
+        ffmpeg.on("error", reject);
+      });
+
+      const audioKey = r2Key.replace(/\.[^.]+$/, ".mp3");
+      const audioBuffer = fs.readFileSync(outputPath);
+      await uploadToR2(audioKey, audioBuffer, "audio/mpeg");
+
+      try { fs.unlinkSync(inputPath); } catch {}
+      try { fs.unlinkSync(outputPath); } catch {}
+      try { fs.rmdirSync(workDir); } catch {}
+
+      res.json({ audioKey });
+    } catch (err: any) {
+      console.error("Music conversion error:", err);
+      res.status(500).json({ error: err.message || "Failed to convert video to audio" });
     }
   });
 

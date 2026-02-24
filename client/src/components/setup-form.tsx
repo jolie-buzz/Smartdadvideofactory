@@ -117,7 +117,7 @@ async function uploadFileWithProgress(
   });
 }
 
-type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "saving" | "done";
+type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "converting-music" | "saving" | "done";
 
 interface SetupFormProps {
   onComplete: () => void;
@@ -327,6 +327,22 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         setUploadProgress(0);
         const musicResult = await uploadFileWithProgress(music, "music", tempAssetId, setUploadProgress);
         musicKeyValue = musicResult.key;
+
+        if (music.type.startsWith("video/")) {
+          setUploadStep("converting-music");
+          setUploadProgress(0);
+          const convertRes = await fetch("/api/convert-music", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ r2Key: musicKeyValue }),
+          });
+          if (!convertRes.ok) {
+            const errData = await convertRes.json().catch(() => ({}));
+            throw new Error(errData.error || "Failed to extract audio from video");
+          }
+          const { audioKey } = await convertRes.json();
+          musicKeyValue = audioKey;
+        }
       }
 
       setUploadStep("saving");
@@ -425,6 +441,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     ? "Uploading video..."
     : uploadStep === "uploading-music"
     ? "Uploading music..."
+    : uploadStep === "converting-music"
+    ? "Extracting audio from video..."
     : uploadStep === "saving"
     ? "Saving..."
     : "";
@@ -867,7 +885,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                   id="music-upload"
                   data-testid="input-music"
                   type="file"
-                  accept="audio/*"
+                  accept="audio/*,video/*"
                   onChange={(e) => setMusic(e.target.files?.[0] || null)}
                   disabled={isUploading}
                   className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
@@ -875,11 +893,14 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 {music && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Music className="w-3 h-3" />
-                    {music.name} ({(music.size / 1024).toFixed(0)} KB)
+                    {music.name} ({(music.size / 1024 / 1024).toFixed(1)} MB)
+                    {music.type.startsWith("video/") && (
+                      <Badge variant="secondary" className="text-[10px] ml-1">video - will extract audio</Badge>
+                    )}
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Upload an MP3 or audio file to mix as background music in the final video.
+                  Upload an audio or video file. If you upload a video, the audio track will be automatically extracted.
                 </p>
               </div>
             )}

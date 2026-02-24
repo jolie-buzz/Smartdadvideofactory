@@ -220,19 +220,33 @@ async function burnCaptions(
   return readFile(outputPath);
 }
 
-async function generateHookHeadline(personaPrompt: string, hookPrompt: string | null, model: string): Promise<string> {
-  const systemMsg = `You are a social media hook headline generator. Generate a short, attention-grabbing headline (5-8 words max) in Taglish that makes viewers stop scrolling. Output ONLY the headline text, nothing else.`;
+async function generateHookHeadline(personaPrompt: string, hookPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
+  const systemMsg = `You are a social media hook headline generator. Generate a short, attention-grabbing headline (5-8 words max) in Taglish that makes viewers stop scrolling. Output ONLY the headline text, nothing else. If a product image is provided, use the visible product details, branding, and features from the image to craft a more specific and compelling headline.`;
 
-  const userMsg = hookPrompt
+  const textMsg = hookPrompt
     ? `Product context: ${personaPrompt}\n\nHook instruction: ${hookPrompt}`
     : `Generate an unskippable hook headline for this product: ${personaPrompt}`;
+
+  const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+  if (photoUrl) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: photoUrl },
+    });
+  }
+
+  userContent.push({
+    type: "text",
+    text: textMsg,
+  });
 
   const response = await openai.chat.completions.create({
     model,
     max_completion_tokens: 100,
     messages: [
       { role: "system", content: systemMsg },
-      { role: "user", content: userMsg },
+      { role: "user", content: userContent as any },
     ],
   });
 
@@ -349,7 +363,7 @@ async function processJob(jobId: number): Promise<void> {
     if (asset.hookHeadline) {
       await storage.appendJobLog(jobId, "Generating hook headline via AI...");
       try {
-        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, asset.openaiModel);
+        const headline = await generateHookHeadline(asset.personaPrompt, asset.hookPrompt, photoUrl, asset.openaiModel);
         await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
         await storage.appendJobLog(jobId, "Overlaying hook headline on video...");
         finalVideoBuffer = await overlayHookHeadline(finalVideoBuffer, headline, workDir);

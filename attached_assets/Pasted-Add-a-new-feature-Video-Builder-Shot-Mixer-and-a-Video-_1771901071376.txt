@@ -1,0 +1,48 @@
+Add a new feature: Video Builder (Shot Mixer) and a “Video Source” option.
+
+Goal:
+Let the user choose between:
+(A) Upload an already edited video (existing flow)
+(B) Auto-build a new video by mixing uploaded shot clips (new flow)
+Then continue using the existing options for script, voiceover, headline, caption, and background music.
+
+Requirements:
+
+1) UI: Add a “Video Source” selector:
+   - Edited Video (existing)
+   - Video Builder (new)
+
+2) Video Builder UI:
+   - Shot Library uploader (vertical 9:16 clips)
+   - Each clip must be tagged with:
+     category: HOOK | PROBLEM | SOLUTION | HIGHLIGHT | BODY | CTA
+     shotType: demo | aesthetic | feature | top | side | pov | closeup | before_after (required for BODY; optional for others)
+     durationSec
+   - Upload must use Cloudflare R2 presigned URLs (browser uploads direct to R2) to avoid 413 errors.
+   - Save clip metadata (category, shotType, durationSec, r2Key, orientation) in DB.
+
+3) Templates:
+   - Provide duration preset: 45s or 60s (TikTok 9:16).
+   - 45s template:
+     Hook 3s; Problem 1.5s; Solution 1.5s; Highlight 3s; Body 6x6s; CTA can be either a dedicated CTA clip (trim body to 5 clips) or embed CTA during last body clip.
+   - 60s template:
+     Hook 3s; Problem 1.5s; Solution 1.5s; Highlight 3s; Body 8x6s; CTA 3s.
+
+4) Variant generation:
+   - User chooses N variants to generate.
+   - Enforce:
+     a) No duplicate clip within a single video
+     b) Avoid recently used clips (last 10 variants per product/campaign)
+     c) Body must include >= 4 distinct shotTypes
+   - Save each variant’s selected clip IDs and order in DB.
+
+5) Rendering:
+   - Use ffmpeg to concatenate selected clips into a base video (silent) at 1080x1920 (9:16).
+   - Store base video MP4 to R2 and return its URL/key.
+
+6) Integration:
+   - Feed the generated base video into the existing pipeline that already generates:
+     script, ElevenLabs voiceover, headline, caption, background music toggle, and final render.
+   - The only new part is the base video builder + selector.
+
+7) Provide a simple “Video Builder Results” list with downloadable links and the ability to send one chosen base video into the existing AI voiceover workflow.

@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy } from "lucide-react";
 import type { Asset } from "@shared/schema";
 
 interface SetupsListProps {
@@ -29,6 +29,20 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       toast({ title: "Job activated", description: "A new job has been queued for processing." });
       onActivate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/assets/${id}/duplicate`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      toast({ title: "Duplicated", description: "Setup has been copied. You can now edit the copy." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -157,6 +171,20 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
                   title="Edit setup"
                 >
                   <Pencil className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  onClick={() => duplicateMutation.mutate(asset.id)}
+                  disabled={duplicateMutation.isPending}
+                  data-testid={`button-duplicate-${asset.id}`}
+                  title="Duplicate setup"
+                >
+                  {duplicateMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
                 </Button>
                 <Button
                   size="icon"

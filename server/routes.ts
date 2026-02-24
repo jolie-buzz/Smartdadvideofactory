@@ -192,6 +192,48 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/assets/:id/duplicate", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const asset = await storage.getAsset(id);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      const duplicate = await storage.createAsset({
+        name: `${asset.name} (Copy)`,
+        photoKey: asset.photoKey,
+        videoKey: asset.videoKey,
+        videoSource: asset.videoSource,
+        personaPrompt: asset.personaPrompt,
+        voiceId: asset.voiceId,
+        voiceName: asset.voiceName,
+        openaiModel: asset.openaiModel,
+        elevenlabsModel: asset.elevenlabsModel,
+        useEnhance: asset.useEnhance,
+        thresholdDb: asset.thresholdDb,
+        removeSilencesLongerThan: asset.removeSilencesLongerThan,
+        ignoreDetectionsShorterThan: asset.ignoreDetectionsShorterThan,
+        musicKey: asset.musicKey,
+        voiceVolume: asset.voiceVolume,
+        musicVolume: asset.musicVolume,
+        autoCaptions: asset.autoCaptions,
+        hookHeadline: asset.hookHeadline,
+        hookPrompt: asset.hookPrompt,
+        hookModel: asset.hookModel,
+        captionEnabled: asset.captionEnabled,
+        captionPrompt: asset.captionPrompt,
+        captionModel: asset.captionModel,
+        seoEnabled: asset.seoEnabled,
+        seoPrompt: asset.seoPrompt,
+        seoModel: asset.seoModel,
+      });
+
+      res.status(201).json(duplicate);
+    } catch (err: any) {
+      console.error("Duplicate error:", err);
+      res.status(500).json({ error: err.message || "Failed to duplicate setup" });
+    }
+  });
+
   app.delete("/api/assets/:id", async (req, res) => {
     try {
       await storage.deleteAsset(parseInt(req.params.id));

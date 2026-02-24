@@ -396,7 +396,48 @@ export async function registerRoutes(
       if (!job.finalVideoKey) {
         return res.status(404).send("Video not yet available.");
       }
-      const url = await getSignedDownloadUrl(job.finalVideoKey);
+      const previewUrl = await getSignedDownloadUrl(job.finalVideoKey);
+      const downloadUrl = await getSignedDownloadUrl(job.finalVideoKey, `video-${job.id}.mp4`);
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shared Video</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+    .container { max-width: 600px; width: 100%; text-align: center; }
+    video { width: 100%; max-height: 70vh; border-radius: 12px; background: #000; margin-bottom: 20px; }
+    .download-btn { display: inline-block; background: #2563eb; color: #fff; text-decoration: none; padding: 16px 40px; border-radius: 12px; font-size: 18px; font-weight: 600; margin-top: 8px; transition: background 0.2s; }
+    .download-btn:hover { background: #1d4ed8; }
+    .download-btn:active { background: #1e40af; }
+    .subtitle { color: #888; font-size: 14px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <video src="${previewUrl}" controls playsinline preload="metadata"></video>
+    <a href="/s/${req.params.token}/download" class="download-btn">Download Video</a>
+    <p class="subtitle">SmartDad Video Factory</p>
+  </div>
+</body>
+</html>`);
+    } catch (err: any) {
+      res.status(500).send("Error generating download link.");
+    }
+  });
+
+  app.get("/s/:token/download", async (req, res) => {
+    try {
+      const job = await storage.getJobByShareToken(req.params.token);
+      if (!job || !job.shareEnabled || job.shareRevokedAt) {
+        return res.status(404).send("Link not found or has been revoked.");
+      }
+      if (!job.finalVideoKey) {
+        return res.status(404).send("Video not yet available.");
+      }
+      const url = await getSignedDownloadUrl(job.finalVideoKey, `video-${job.id}.mp4`);
       res.redirect(url);
     } catch (err: any) {
       res.status(500).send("Error generating download link.");

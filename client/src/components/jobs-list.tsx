@@ -254,17 +254,12 @@ export function JobsList() {
         : `/api/jobs/${jobId}/download-audio-clean`;
       const res = await apiRequest("GET", endpoint);
       const data = await res.json();
-      const ext = type === "final" ? "mp4" : "mp3";
-      const blobRes = await fetch(data.url);
-      const blob = await blobRes.blob();
-      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `job-${jobId}-${type}.${ext}`;
+      a.href = data.url;
+      a.target = "_self";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
       return data;
     },
     onSuccess: () => {

@@ -210,25 +210,37 @@ export function JobsList() {
     (j) => !["done", "failed"].includes(j.status)
   );
 
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
   const downloadMutation = useMutation({
     mutationFn: async ({ jobId, type }: { jobId: number; type: "final" | "raw" | "clean" }) => {
+      const dlKey = `${jobId}-${type}`;
+      setDownloadingId(dlKey);
       const endpoint = type === "final"
         ? `/api/jobs/${jobId}/download`
         : type === "raw"
         ? `/api/jobs/${jobId}/download-audio-raw`
         : `/api/jobs/${jobId}/download-audio-clean`;
       const res = await apiRequest("GET", endpoint);
-      return res.json();
-    },
-    onSuccess: (data: { url: string }) => {
+      const data = await res.json();
+      const ext = type === "final" ? "mp4" : "mp3";
+      const blobRes = await fetch(data.url);
+      const blob = await blobRes.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = data.url;
-      a.download = "";
+      a.href = blobUrl;
+      a.download = `job-${jobId}-${type}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return data;
+    },
+    onSuccess: () => {
+      setDownloadingId(null);
     },
     onError: (err: Error) => {
+      setDownloadingId(null);
       toast({ title: "Download Error", description: err.message, variant: "destructive" });
     },
   });
@@ -362,8 +374,11 @@ export function JobsList() {
                         disabled={downloadMutation.isPending}
                         data-testid={`button-download-${job.id}`}
                       >
-                        <Download className="w-4 h-4 mr-1" />
-                        Video
+                        {downloadingId === `${job.id}-final` ? (
+                          <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Downloading...</>
+                        ) : (
+                          <><Download className="w-4 h-4 mr-1" /> Video</>
+                        )}
                       </Button>
                     </>
                   )}
@@ -465,9 +480,14 @@ export function JobsList() {
                         size="sm"
                         variant="outline"
                         onClick={() => downloadMutation.mutate({ jobId: job.id, type: "raw" })}
+                        disabled={downloadMutation.isPending}
                         data-testid={`button-download-raw-${job.id}`}
                       >
-                        <Download className="w-3 h-3 mr-1" /> Raw Audio
+                        {downloadingId === `${job.id}-raw` ? (
+                          <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Downloading...</>
+                        ) : (
+                          <><Download className="w-3 h-3 mr-1" /> Raw Audio</>
+                        )}
                       </Button>
                     )}
                     {job.audioCleanKey && (
@@ -475,9 +495,14 @@ export function JobsList() {
                         size="sm"
                         variant="outline"
                         onClick={() => downloadMutation.mutate({ jobId: job.id, type: "clean" })}
+                        disabled={downloadMutation.isPending}
                         data-testid={`button-download-clean-${job.id}`}
                       >
-                        <Download className="w-3 h-3 mr-1" /> Clean Audio
+                        {downloadingId === `${job.id}-clean` ? (
+                          <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Downloading...</>
+                        ) : (
+                          <><Download className="w-3 h-3 mr-1" /> Clean Audio</>
+                        )}
                       </Button>
                     )}
                   </div>

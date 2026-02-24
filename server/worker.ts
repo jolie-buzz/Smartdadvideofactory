@@ -319,10 +319,11 @@ async function overlayHookHeadline(
   await runFfmpeg([
     "-i", videoPath,
     "-vf", `drawtext=${effectParams}`,
+    "-preset", "ultrafast",
     "-c:a", "copy",
     "-y",
     outputPath,
-  ], 120_000);
+  ], 600_000);
 
   return readFile(outputPath);
 }

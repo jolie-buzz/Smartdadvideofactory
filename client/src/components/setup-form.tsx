@@ -12,7 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { Asset } from "@shared/schema";
 
 interface Voice {
@@ -105,6 +106,7 @@ interface SetupFormProps {
 export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormProps) {
   const { toast } = useToast();
   const [name, setName] = useState("");
+  const [videoSource, setVideoSource] = useState<"edited" | "builder">("edited");
   const [personaPrompt, setPersonaPrompt] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
@@ -134,6 +136,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   useEffect(() => {
     if (editingAsset) {
       setName(editingAsset.name);
+      setVideoSource((editingAsset.videoSource as "edited" | "builder") || "edited");
       setPersonaPrompt(editingAsset.personaPrompt);
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
@@ -170,7 +173,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+            name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
           }),
@@ -191,17 +194,20 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       return;
     }
 
-    if (!photo || !video) return;
+    if (!photo) return;
+    if (videoSource === "edited" && !video) return;
 
     const photoSizeMB = photo.size / 1024 / 1024;
-    const videoSizeMB = video.size / 1024 / 1024;
     if (photoSizeMB > MAX_FILE_SIZE_MB) {
       toast({ title: "Error", description: `Photo is too large (${photoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
       return;
     }
-    if (videoSizeMB > MAX_FILE_SIZE_MB) {
-      toast({ title: "Error", description: `Video is too large (${videoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
-      return;
+    if (video) {
+      const videoSizeMB = video.size / 1024 / 1024;
+      if (videoSizeMB > MAX_FILE_SIZE_MB) {
+        toast({ title: "Error", description: `Video is too large (${videoSizeMB.toFixed(0)} MB). Max is ${MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
+        return;
+      }
     }
 
     const assetId = crypto.randomUUID();
@@ -211,9 +217,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setUploadProgress(0);
       const photoResult = await uploadFileWithProgress(photo, "photo", assetId, setUploadProgress);
 
-      setUploadStep("uploading-video");
-      setUploadProgress(0);
-      const videoResult = await uploadFileWithProgress(video, "video", assetId, setUploadProgress);
+      let videoResult: { key: string; assetId: string } | null = null;
+      if (video && videoSource === "edited") {
+        setUploadStep("uploading-video");
+        setUploadProgress(0);
+        videoResult = await uploadFileWithProgress(video, "video", assetId, setUploadProgress);
+      }
 
       let musicKeyValue: string | null = null;
       if (music) {
@@ -228,8 +237,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, photoKey: photoResult.key, videoKey: videoResult.key,
-          personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+          name, photoKey: photoResult.key, videoKey: videoResult?.key || "",
+          videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null,
@@ -280,12 +289,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const canSave = isEditing
     ? name && personaPrompt && voiceId
-    : name && personaPrompt && photo && video && voiceId;
+    : name && personaPrompt && photo && (videoSource === "builder" || video) && voiceId;
 
   const missingFields = [];
   if (!name) missingFields.push("Setup Name");
   if (!isEditing && !photo) missingFields.push("Product Photo");
-  if (!isEditing && !video) missingFields.push("Edited Video");
+  if (!isEditing && videoSource === "edited" && !video) missingFields.push("Edited Video");
   if (!personaPrompt) missingFields.push("Persona Prompt");
   if (!voiceId) missingFields.push("Voice");
 
@@ -330,21 +339,19 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           </div>
 
           {!isEditing && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <>
               <div className="space-y-2">
                 <Label htmlFor="photo-upload">Product Photo</Label>
-                <div className="relative">
-                  <Input
-                    ref={photoInputRef}
-                    id="photo-upload"
-                    data-testid="input-photo"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setPhoto(e.target.files?.[0] || null)}
-                    disabled={isUploading}
-                    className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
-                  />
-                </div>
+                <Input
+                  ref={photoInputRef}
+                  id="photo-upload"
+                  data-testid="input-photo"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhoto(e.target.files?.[0] || null)}
+                  disabled={isUploading}
+                  className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                />
                 {photo && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Image className="w-3 h-3" />
@@ -353,32 +360,64 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="video-upload">Edited Video</Label>
-                <Input
-                  ref={videoInputRef}
-                  id="video-upload"
-                  data-testid="input-video"
-                  type="file"
-                  accept="video/*"
-                  onChange={(e) => setVideo(e.target.files?.[0] || null)}
+              <div className="space-y-3">
+                <Label>Video Source</Label>
+                <RadioGroup
+                  value={videoSource}
+                  onValueChange={(v) => setVideoSource(v as "edited" | "builder")}
+                  className="flex gap-4"
                   disabled={isUploading}
-                  className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
-                />
-                {video && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Film className="w-3 h-3" />
-                    {video.name} ({videoSizeMB.toFixed(1)} MB)
-                  </p>
-                )}
-                {isLargeFile && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    Large file - upload may take a while on slow connections
-                  </p>
-                )}
+                >
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="edited" id="vs-edited" data-testid="radio-video-edited" />
+                    <Label htmlFor="vs-edited" className="flex items-center gap-1.5 cursor-pointer">
+                      <Film className="w-4 h-4" />
+                      Edited Video
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="builder" id="vs-builder" data-testid="radio-video-builder" />
+                    <Label htmlFor="vs-builder" className="flex items-center gap-1.5 cursor-pointer">
+                      <Clapperboard className="w-4 h-4" />
+                      Video Builder
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <p className="text-xs text-muted-foreground">
+                  {videoSource === "edited"
+                    ? "Upload an already-edited video to use as the base."
+                    : "Build a video from shot clips after creating the setup. Use the Video Builder tab on your setup."}
+                </p>
               </div>
-            </div>
+
+              {videoSource === "edited" && (
+                <div className="space-y-2">
+                  <Label htmlFor="video-upload">Edited Video</Label>
+                  <Input
+                    ref={videoInputRef}
+                    id="video-upload"
+                    data-testid="input-video"
+                    type="file"
+                    accept="video/*"
+                    onChange={(e) => setVideo(e.target.files?.[0] || null)}
+                    disabled={isUploading}
+                    className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                  />
+                  {video && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Film className="w-3 h-3" />
+                      {video.name} ({videoSizeMB.toFixed(1)} MB)
+                    </p>
+                  )}
+                  {isLargeFile && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      Large file - upload may take a while on slow connections
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           <div className="space-y-2">

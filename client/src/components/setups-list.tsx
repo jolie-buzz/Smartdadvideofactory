@@ -5,15 +5,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard } from "lucide-react";
 import type { Asset } from "@shared/schema";
 
 interface SetupsListProps {
   onActivate: () => void;
   onEdit: (asset: Asset) => void;
+  onOpenBuilder?: (asset: Asset) => void;
 }
 
-export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
+export function SetupsList({ onActivate, onEdit, onOpenBuilder }: SetupsListProps) {
   const { toast } = useToast();
 
   const assetsQuery = useQuery<Asset[]>({
@@ -115,7 +116,11 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
                     <Image className="w-3 h-3" /> Photo
                   </span>
                   <span className="flex items-center gap-1">
-                    <Film className="w-3 h-3" /> Video
+                    {asset.videoSource === "builder" ? (
+                      <><Clapperboard className="w-3 h-3" /> Builder</>
+                    ) : (
+                      <><Film className="w-3 h-3" /> Video</>
+                    )}
                   </span>
                   <span className="flex items-center gap-1">
                     <Brain className="w-3 h-3" />
@@ -132,6 +137,17 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {asset.videoSource === "builder" && onOpenBuilder && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onOpenBuilder(asset)}
+                    data-testid={`button-builder-${asset.id}`}
+                  >
+                    <Clapperboard className="w-4 h-4 mr-1" />
+                    Builder
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   onClick={() => activateMutation.mutate(asset.id)}

@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { assets, jobs, type Asset, type InsertAsset, type Job } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { assets, jobs, shots, variants, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant } from "@shared/schema";
+import { eq, desc, inArray } from "drizzle-orm";
 
 export interface IStorage {
   createAsset(asset: InsertAsset): Promise<Asset>;
@@ -15,6 +15,17 @@ export interface IStorage {
   appendJobLog(id: number, message: string): Promise<void>;
   deleteJob(id: number): Promise<void>;
   getJobByShareToken(token: string): Promise<Job | undefined>;
+  createShot(shot: InsertShot): Promise<Shot>;
+  getShots(assetId: number): Promise<Shot[]>;
+  getShot(id: number): Promise<Shot | undefined>;
+  getShotsByIds(ids: number[]): Promise<Shot[]>;
+  deleteShot(id: number): Promise<void>;
+  createVariant(variant: InsertVariant): Promise<Variant>;
+  getVariants(assetId: number): Promise<Variant[]>;
+  getVariant(id: number): Promise<Variant | undefined>;
+  updateVariant(id: number, data: Partial<Variant>): Promise<Variant | undefined>;
+  deleteVariant(id: number): Promise<void>;
+  getRecentVariantClipIds(assetId: number, limit: number): Promise<number[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -83,6 +94,66 @@ export class DatabaseStorage implements IStorage {
   async getJobByShareToken(token: string): Promise<Job | undefined> {
     const [result] = await db.select().from(jobs).where(eq(jobs.shareToken, token));
     return result;
+  }
+
+  async createShot(shot: InsertShot): Promise<Shot> {
+    const [result] = await db.insert(shots).values(shot).returning();
+    return result;
+  }
+
+  async getShots(assetId: number): Promise<Shot[]> {
+    return db.select().from(shots).where(eq(shots.assetId, assetId)).orderBy(desc(shots.createdAt));
+  }
+
+  async getShot(id: number): Promise<Shot | undefined> {
+    const [result] = await db.select().from(shots).where(eq(shots.id, id));
+    return result;
+  }
+
+  async getShotsByIds(ids: number[]): Promise<Shot[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(shots).where(inArray(shots.id, ids));
+  }
+
+  async deleteShot(id: number): Promise<void> {
+    await db.delete(shots).where(eq(shots.id, id));
+  }
+
+  async createVariant(variant: InsertVariant): Promise<Variant> {
+    const [result] = await db.insert(variants).values(variant).returning();
+    return result;
+  }
+
+  async getVariants(assetId: number): Promise<Variant[]> {
+    return db.select().from(variants).where(eq(variants.assetId, assetId)).orderBy(desc(variants.createdAt));
+  }
+
+  async getVariant(id: number): Promise<Variant | undefined> {
+    const [result] = await db.select().from(variants).where(eq(variants.id, id));
+    return result;
+  }
+
+  async updateVariant(id: number, data: Partial<Variant>): Promise<Variant | undefined> {
+    const [result] = await db.update(variants).set(data).where(eq(variants.id, id)).returning();
+    return result;
+  }
+
+  async deleteVariant(id: number): Promise<void> {
+    await db.delete(variants).where(eq(variants.id, id));
+  }
+
+  async getRecentVariantClipIds(assetId: number, limit: number): Promise<number[]> {
+    const recentVariants = await db.select()
+      .from(variants)
+      .where(eq(variants.assetId, assetId))
+      .orderBy(desc(variants.createdAt))
+      .limit(limit);
+    const allClipIds = new Set<number>();
+    for (const v of recentVariants) {
+      const ids = v.clipIds as number[];
+      ids.forEach((id) => allClipIds.add(id));
+    }
+    return Array.from(allClipIds);
   }
 }
 

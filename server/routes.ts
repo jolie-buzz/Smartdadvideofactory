@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors } from "./r2";
+import { uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2 } from "./r2";
 import { startWorker } from "./worker";
+import { renderVariant } from "./video-builder";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
@@ -86,16 +87,20 @@ export async function registerRoutes(
 
   app.post("/api/setup", async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
+      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
 
-      if (!photoKey || !videoKey) {
-        return res.status(400).json({ error: "Both photoKey and videoKey are required. Upload files first." });
+      if (!photoKey) {
+        return res.status(400).json({ error: "photoKey is required. Upload photo first." });
+      }
+      if (videoSource !== "builder" && !videoKey) {
+        return res.status(400).json({ error: "videoKey is required for edited video source. Upload video first." });
       }
 
       const asset = await storage.createAsset({
         name: name || "Untitled Setup",
         photoKey,
-        videoKey,
+        videoKey: videoKey || "",
+        videoSource: videoSource || "edited",
         personaPrompt: personaPrompt || "",
         voiceId: voiceId || null,
         voiceName: voiceName || null,
@@ -145,10 +150,12 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, videoSource, videoKey } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
+      if (videoSource !== undefined) updateData.videoSource = videoSource;
+      if (videoKey !== undefined) updateData.videoKey = videoKey;
       if (voiceId !== undefined) updateData.voiceId = voiceId;
       if (voiceName !== undefined) updateData.voiceName = voiceName;
       if (openaiModel !== undefined) updateData.openaiModel = openaiModel;
@@ -379,6 +386,286 @@ export async function registerRoutes(
       res.redirect(url);
     } catch (err: any) {
       res.status(500).send("Error generating download link.");
+    }
+  });
+
+  app.post("/api/upload-shot-url", async (req, res) => {
+    try {
+      const { assetId, filename, contentType } = req.body;
+      if (!assetId || !filename || !contentType) {
+        return res.status(400).json({ error: "assetId, filename, and contentType are required" });
+      }
+      const ext = filename.split(".").pop()?.toLowerCase() || "mp4";
+      const uniqueId = uuidv4().slice(0, 8);
+      const key = `shots/${assetId}/${uniqueId}.${ext}`;
+      const url = await getSignedUploadUrl(key, contentType);
+      res.json({ url, key });
+    } catch (err: any) {
+      console.error("Shot presigned URL error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/assets/:id/shots", async (req, res) => {
+    try {
+      const assetId = parseInt(req.params.id);
+      const asset = await storage.getAsset(assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      const { category, shotType, durationSec, r2Key, orientation, filename } = req.body;
+      if (!category || !durationSec || !r2Key) {
+        return res.status(400).json({ error: "category, durationSec, and r2Key are required" });
+      }
+
+      const shot = await storage.createShot({
+        assetId,
+        category,
+        shotType: shotType || null,
+        durationSec: parseFloat(durationSec),
+        r2Key,
+        orientation: orientation || "portrait",
+        filename: filename || null,
+      });
+
+      res.status(201).json(shot);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/assets/:id/shots", async (req, res) => {
+    try {
+      const assetId = parseInt(req.params.id);
+      const shotsList = await storage.getShots(assetId);
+      res.json(shotsList);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/shots/:id", async (req, res) => {
+    try {
+      await storage.deleteShot(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/assets/:id/generate-variants", async (req, res) => {
+    try {
+      const assetId = parseInt(req.params.id);
+      const asset = await storage.getAsset(assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      const { templateDuration, numVariants } = req.body;
+      const duration = parseInt(templateDuration) || 45;
+      const count = Math.min(parseInt(numVariants) || 1, 20);
+
+      if (duration !== 45 && duration !== 60) {
+        return res.status(400).json({ error: "templateDuration must be 45 or 60" });
+      }
+
+      const allShots = await storage.getShots(assetId);
+      if (allShots.length === 0) {
+        return res.status(400).json({ error: "No shots uploaded. Upload shot clips first." });
+      }
+
+      const recentClipIds = await storage.getRecentVariantClipIds(assetId, 10);
+
+      const shotsByCategory: Record<string, typeof allShots> = {};
+      for (const s of allShots) {
+        if (!shotsByCategory[s.category]) shotsByCategory[s.category] = [];
+        shotsByCategory[s.category].push(s);
+      }
+
+      const hookShots = shotsByCategory["HOOK"] || [];
+      const problemShots = shotsByCategory["PROBLEM"] || [];
+      const solutionShots = shotsByCategory["SOLUTION"] || [];
+      const highlightShots = shotsByCategory["HIGHLIGHT"] || [];
+      const bodyShots = shotsByCategory["BODY"] || [];
+      const ctaShots = shotsByCategory["CTA"] || [];
+
+      if (hookShots.length === 0) return res.status(400).json({ error: "At least 1 HOOK shot is required" });
+      if (bodyShots.length < 4) return res.status(400).json({ error: "At least 4 BODY shots with distinct shotTypes are required" });
+
+      const bodyTypesArr = bodyShots.map(s => s.shotType).filter((t): t is string => !!t);
+      const bodyTypesAvailable = new Set(bodyTypesArr);
+      if (bodyTypesAvailable.size < 4) {
+        return res.status(400).json({ error: `Need >= 4 distinct BODY shotTypes, found ${bodyTypesAvailable.size}: ${Array.from(bodyTypesAvailable).join(", ")}` });
+      }
+
+      const bodyCount = duration === 45 ? 6 : 8;
+      const needCta = duration === 60 || ctaShots.length > 0;
+
+      const createdVariants = [];
+
+      for (let v = 0; v < count; v++) {
+        const usedIds = new Set<number>();
+        const clipIds: number[] = [];
+
+        const pick = (pool: typeof allShots, fallback?: typeof allShots): number | null => {
+          const preferred = pool.filter(s => !usedIds.has(s.id) && !recentClipIds.includes(s.id));
+          const available = preferred.length > 0 ? preferred : pool.filter(s => !usedIds.has(s.id));
+          if (available.length === 0 && fallback) {
+            const fb = fallback.filter(s => !usedIds.has(s.id));
+            if (fb.length > 0) {
+              const chosen = fb[Math.floor(Math.random() * fb.length)];
+              usedIds.add(chosen.id);
+              return chosen.id;
+            }
+            return null;
+          }
+          if (available.length === 0) return null;
+          const chosen = available[Math.floor(Math.random() * available.length)];
+          usedIds.add(chosen.id);
+          return chosen.id;
+        };
+
+        const hookId = pick(hookShots);
+        if (hookId) clipIds.push(hookId);
+
+        const problemId = pick(problemShots, hookShots);
+        if (problemId) clipIds.push(problemId);
+
+        const solutionId = pick(solutionShots, highlightShots);
+        if (solutionId) clipIds.push(solutionId);
+
+        const highlightId = pick(highlightShots, bodyShots);
+        if (highlightId) clipIds.push(highlightId);
+
+        const usedBodyTypes = new Set<string>();
+        const bodyClipIds: number[] = [];
+        const effectiveBodyCount = (needCta && duration === 45 && ctaShots.length > 0) ? bodyCount - 1 : bodyCount;
+
+        for (let b = 0; b < effectiveBodyCount; b++) {
+          let pool: typeof allShots;
+          if (usedBodyTypes.size < 4) {
+            pool = bodyShots.filter(s =>
+              !usedIds.has(s.id) && s.shotType && !usedBodyTypes.has(s.shotType)
+            );
+            if (pool.length === 0) {
+              pool = bodyShots.filter(s => !usedIds.has(s.id));
+            }
+          } else {
+            pool = bodyShots.filter(s => !usedIds.has(s.id));
+          }
+
+          const preferred = pool.filter(s => !recentClipIds.includes(s.id));
+          const candidates = preferred.length > 0 ? preferred : pool;
+          if (candidates.length === 0) break;
+
+          const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+          usedIds.add(chosen.id);
+          if (chosen.shotType) usedBodyTypes.add(chosen.shotType);
+          bodyClipIds.push(chosen.id);
+        }
+        clipIds.push(...bodyClipIds);
+
+        if (needCta) {
+          const ctaId = pick(ctaShots, bodyShots);
+          if (ctaId) clipIds.push(ctaId);
+        }
+
+        const variant = await storage.createVariant({
+          assetId,
+          templateDuration: duration,
+          clipIds,
+          status: "pending",
+        });
+        createdVariants.push(variant);
+      }
+
+      res.status(201).json(createdVariants);
+    } catch (err: any) {
+      console.error("Generate variants error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/assets/:id/variants", async (req, res) => {
+    try {
+      const assetId = parseInt(req.params.id);
+      const variantsList = await storage.getVariants(assetId);
+      res.json(variantsList);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/variants/:id/render", async (req, res) => {
+    try {
+      const variantId = parseInt(req.params.id);
+      const variant = await storage.getVariant(variantId);
+      if (!variant) return res.status(404).json({ error: "Variant not found" });
+      if (variant.status === "rendering") {
+        return res.status(409).json({ error: "Already rendering" });
+      }
+
+      await storage.updateVariant(variantId, { status: "rendering" });
+      res.json({ status: "rendering", variantId });
+
+      renderVariant(variantId).catch(async (err: any) => {
+        console.error(`Variant ${variantId} render failed:`, err);
+        await storage.updateVariant(variantId, { status: "failed" });
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/variants/:id/download", async (req, res) => {
+    try {
+      const variant = await storage.getVariant(parseInt(req.params.id));
+      if (!variant) return res.status(404).json({ error: "Variant not found" });
+      if (!variant.r2Key) return res.status(400).json({ error: "Video not yet rendered" });
+      const url = await getSignedDownloadUrl(variant.r2Key, `variant-${variant.id}.mp4`);
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/variants/:id/preview", async (req, res) => {
+    try {
+      const variant = await storage.getVariant(parseInt(req.params.id));
+      if (!variant) return res.status(404).json({ error: "Variant not found" });
+      if (!variant.r2Key) return res.status(400).json({ error: "Video not yet rendered" });
+      const url = await getSignedDownloadUrl(variant.r2Key);
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/variants/:id", async (req, res) => {
+    try {
+      await storage.deleteVariant(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/variants/:id/send-to-pipeline", async (req, res) => {
+    try {
+      const variantId = parseInt(req.params.id);
+      const variant = await storage.getVariant(variantId);
+      if (!variant) return res.status(404).json({ error: "Variant not found" });
+      if (!variant.r2Key) return res.status(400).json({ error: "Variant not yet rendered" });
+
+      const asset = await storage.getAsset(variant.assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (!asset.voiceId) return res.status(400).json({ error: "No voice selected for this setup. Edit the setup first." });
+
+      await storage.updateAsset(variant.assetId, { videoKey: variant.r2Key });
+
+      const job = await storage.createJob(variant.assetId);
+      await storage.appendJobLog(job.id, `Job created from Video Builder variant #${variantId}`);
+
+      res.status(201).json(job);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

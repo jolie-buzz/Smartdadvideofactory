@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, serial, text, integer, real, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -8,6 +8,7 @@ export const assets = pgTable("assets", {
   name: text("name").notNull(),
   photoKey: text("photo_key").notNull(),
   videoKey: text("video_key").notNull(),
+  videoSource: text("video_source").notNull().default("edited"),
   personaPrompt: text("persona_prompt").notNull(),
   voiceId: text("voice_id"),
   voiceName: text("voice_name"),
@@ -41,6 +42,28 @@ export const jobs = pgTable("jobs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const shots = pgTable("shots", {
+  id: serial("id").primaryKey(),
+  assetId: integer("asset_id").notNull().references(() => assets.id),
+  category: text("category").notNull(),
+  shotType: text("shot_type"),
+  durationSec: real("duration_sec").notNull(),
+  r2Key: text("r2_key").notNull(),
+  orientation: text("orientation").notNull().default("portrait"),
+  filename: text("filename"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const variants = pgTable("variants", {
+  id: serial("id").primaryKey(),
+  assetId: integer("asset_id").notNull().references(() => assets.id),
+  templateDuration: integer("template_duration").notNull(),
+  clipIds: jsonb("clip_ids").notNull().$type<number[]>(),
+  r2Key: text("r2_key"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertAssetSchema = createInsertSchema(assets).omit({
   id: true,
   createdAt: true,
@@ -51,9 +74,23 @@ export const insertJobSchema = createInsertSchema(jobs).omit({
   createdAt: true,
 });
 
+export const insertShotSchema = createInsertSchema(shots).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertVariantSchema = createInsertSchema(variants).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Job = typeof jobs.$inferSelect;
 export type InsertJob = z.infer<typeof insertJobSchema>;
+export type Shot = typeof shots.$inferSelect;
+export type InsertShot = z.infer<typeof insertShotSchema>;
+export type Variant = typeof variants.$inferSelect;
+export type InsertVariant = z.infer<typeof insertVariantSchema>;
 
 export * from "./models/chat";

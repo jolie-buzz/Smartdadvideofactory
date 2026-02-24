@@ -93,16 +93,29 @@ async function generateVoice(scriptText: string, voiceId: string, elevenlabsMode
   return Buffer.from(arrayBuffer);
 }
 
-function runFfmpeg(args: string[]): Promise<string> {
+function runFfmpeg(args: string[], timeoutMs: number = 300_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", args);
     let stderr = "";
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill("SIGKILL");
+      reject(new Error(`ffmpeg timed out after ${timeoutMs / 1000}s. Last output: ${stderr.slice(-500)}`));
+    }, timeoutMs);
+
     proc.stderr.on("data", (d) => (stderr += d.toString()));
     proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (killed) return;
       if (code === 0) resolve(stderr);
-      else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-1000)}`));
     });
-    proc.on("error", reject);
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      if (!killed) reject(err);
+    });
   });
 }
 
@@ -206,17 +219,17 @@ async function burnCaptions(
   const outputPath = join(workDir, "video_captioned.mp4");
 
   await writeFile(videoPath, videoBuffer);
-  await writeFile(srtPath, srtContent);
+  await writeFile(srtPath, "\uFEFF" + srtContent, "utf-8");
 
   const escapedSrtPath = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:");
 
   await runFfmpeg([
     "-i", videoPath,
-    "-vf", `subtitles='${escapedSrtPath}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=30'`,
+    "-vf", `subtitles='${escapedSrtPath}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=30,FontName=FreeSans'`,
     "-c:a", "copy",
     "-y",
     outputPath,
-  ]);
+  ], 180_000);
 
   return readFile(outputPath);
 }
@@ -272,7 +285,7 @@ async function overlayHookHeadline(
     "-c:a", "copy",
     "-y",
     outputPath,
-  ]);
+  ], 120_000);
 
   return readFile(outputPath);
 }

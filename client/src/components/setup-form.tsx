@@ -13,7 +13,8 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors, Play, SkipForward, SkipBack } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors } from "lucide-react";
+import VideoTrimmer from "./video-trimmer";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { Asset } from "@shared/schema";
 
@@ -163,16 +164,38 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [sourceR2Key, setSourceR2Key] = useState<string | null>(null);
   const [sourceUploading, setSourceUploading] = useState(false);
   const [sourceUploadProgress, setSourceUploadProgress] = useState(0);
-  const [trimStart, setTrimStart] = useState<string>("0");
-  const [trimEnd, setTrimEnd] = useState<string>("6");
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(6);
   const [trimming, setTrimming] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
+  const [sourceVideoUrl, setSourceVideoUrl] = useState<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
-  const sourceVideoRef = useRef<HTMLVideoElement>(null);
 
   const isEditing = !!editingAsset;
   const isUploading = uploadStep !== "idle" && uploadStep !== "done";
+
+  useEffect(() => {
+    if (!sourceFile) {
+      setVideoDuration(0);
+      setSourceVideoUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(sourceFile);
+    setSourceVideoUrl(url);
+
+    const vid = document.createElement("video");
+    vid.preload = "metadata";
+    vid.src = url;
+    vid.onloadedmetadata = () => {
+      const dur = Math.round(vid.duration * 10) / 10;
+      setVideoDuration(dur);
+      setTrimEnd(Math.min(6, dur));
+    };
+    return () => {
+      URL.revokeObjectURL(url);
+      setSourceVideoUrl(null);
+    };
+  }, [sourceFile]);
 
   useEffect(() => {
     if (editingAsset) {
@@ -254,14 +277,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const handleTrimShot = async () => {
     if (!sourceR2Key || sourceUploading) return;
-    const start = parseFloat(trimStart);
-    const end = parseFloat(trimEnd);
-    if (isNaN(start) || isNaN(end) || end <= start) {
+    if (trimEnd <= trimStart) {
       toast({ title: "Invalid trim", description: "End time must be after start time.", variant: "destructive" });
       return;
     }
-    if (videoDuration > 0 && end > videoDuration + 0.5) {
-      toast({ title: "Invalid trim", description: `End time (${end}s) exceeds video duration (${videoDuration}s).`, variant: "destructive" });
+    if (videoDuration > 0 && trimEnd > videoDuration + 0.5) {
+      toast({ title: "Invalid trim", description: `End time (${trimEnd}s) exceeds video duration (${videoDuration}s).`, variant: "destructive" });
       return;
     }
 
@@ -273,8 +294,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sourceR2Key,
-          startSec: start,
-          endSec: end,
+          startSec: trimStart,
+          endSec: trimEnd,
           assetId: tempAssetId,
         }),
       });
@@ -290,7 +311,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         category: shotCategory,
         shotType: shotType && shotType !== "none" ? shotType : null,
         durationSec,
-        filename: `trim_${formatTime(start)}-${formatTime(end)}`,
+        filename: `trim_${formatTime(trimStart)}-${formatTime(trimEnd)}`,
       };
 
       setPendingShots((prev) => [...prev, newShot]);
@@ -306,14 +327,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     const m = Math.floor(sec / 60);
     const s = (sec % 60).toFixed(1);
     return `${m}:${s.padStart(4, "0")}`;
-  };
-
-  const handleSetTrimFromPlayer = (which: "start" | "end") => {
-    const vid = sourceVideoRef.current;
-    if (!vid) return;
-    const t = Math.round(vid.currentTime * 10) / 10;
-    if (which === "start") setTrimStart(String(t));
-    else setTrimEnd(String(t));
   };
 
   const handleDeletePendingShot = (shotId: string) => {
@@ -683,99 +696,25 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                       )}
                     </div>
 
-                    {sourceFile && sourceR2Key && (
+                    {sourceFile && sourceR2Key && sourceVideoUrl && (
                       <>
-                        <div className="rounded-md overflow-hidden bg-black">
-                          <video
-                            ref={sourceVideoRef}
-                            src={URL.createObjectURL(sourceFile)}
-                            controls
-                            className="w-full max-h-64"
-                            data-testid="video-source-preview"
-                            onTimeUpdate={() => {
-                              const vid = sourceVideoRef.current;
-                              if (vid) setCurrentTime(Math.round(vid.currentTime * 10) / 10);
-                            }}
-                            onLoadedMetadata={() => {
-                              const vid = sourceVideoRef.current;
-                              if (vid) setVideoDuration(Math.round(vid.duration * 10) / 10);
-                            }}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-                          <span>Current: <span className="font-mono font-medium text-foreground">{formatTime(currentTime)}</span></span>
-                          <span>Duration: <span className="font-mono">{formatTime(videoDuration)}</span></span>
-                        </div>
+                        <VideoTrimmer
+                          videoSrc={sourceVideoUrl}
+                          duration={videoDuration}
+                          startTime={trimStart}
+                          endTime={trimEnd}
+                          onStartChange={setTrimStart}
+                          onEndChange={setTrimEnd}
+                          disabled={trimming}
+                        />
 
                         <Separator />
 
                         <div className="space-y-3">
                           <div className="flex items-center gap-2">
                             <Scissors className="w-4 h-4" />
-                            <h4 className="text-xs font-medium">Trim a Shot</h4>
+                            <h4 className="text-xs font-medium">Shot Details</h4>
                           </div>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                              <Label className="text-[10px]">Start (sec)</Label>
-                              <div className="flex gap-1">
-                                <Input
-                                  data-testid="input-trim-start"
-                                  type="number"
-                                  value={trimStart}
-                                  onChange={(e) => setTrimStart(e.target.value)}
-                                  min="0"
-                                  step="0.1"
-                                  disabled={trimming}
-                                  className="h-8 text-xs"
-                                />
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleSetTrimFromPlayer("start")}
-                                  disabled={trimming}
-                                  data-testid="button-set-start"
-                                  title="Set start from current playback position"
-                                >
-                                  <SkipBack className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[10px]">End (sec)</Label>
-                              <div className="flex gap-1">
-                                <Input
-                                  data-testid="input-trim-end"
-                                  type="number"
-                                  value={trimEnd}
-                                  onChange={(e) => setTrimEnd(e.target.value)}
-                                  min="0"
-                                  step="0.1"
-                                  disabled={trimming}
-                                  className="h-8 text-xs"
-                                />
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleSetTrimFromPlayer("end")}
-                                  disabled={trimming}
-                                  data-testid="button-set-end"
-                                  title="Set end from current playback position"
-                                >
-                                  <SkipForward className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {parseFloat(trimEnd) > parseFloat(trimStart) && (
-                            <p className="text-[10px] text-muted-foreground">
-                              Clip duration: {(parseFloat(trimEnd) - parseFloat(trimStart)).toFixed(1)}s
-                            </p>
-                          )}
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div className="space-y-1">
@@ -818,7 +757,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
                           <Button
                             onClick={handleTrimShot}
-                            disabled={!sourceR2Key || trimming || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none")) || parseFloat(trimEnd) <= parseFloat(trimStart)}
+                            disabled={!sourceR2Key || trimming || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none")) || trimEnd <= trimStart}
                             data-testid="button-trim-shot"
                             size="sm"
                             className="w-full"

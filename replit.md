@@ -73,6 +73,8 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-24: Fixed caption burning: installed libass/fontconfig/fonts, added FFmpeg timeout (180s captions, 120s hook), UTF-8 BOM for SRT, FontName=FreeSans
+- 2026-02-24: Built CapCut-style video trimmer for Video Builder: thumbnail timeline strip, draggable start/end handles, region drag, playhead sync, preview clip playback
 - 2026-02-24: Added Video Builder feature (shot library, variant generation, FFmpeg rendering, send-to-pipeline)
 - 2026-02-24: Added video preview modal, background music upload with volume controls, auto captions (Whisper + FFmpeg subtitles), hook headline toggle with custom prompt and product photo vision (OpenAI + FFmpeg drawtext)
 - 2026-02-23: Added ElevenLabs enhance (speaker boost) toggle, delete buttons for setups and jobs

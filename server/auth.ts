@@ -6,6 +6,9 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import type { Express, Request, Response, NextFunction } from "express";
 import { storage } from "./storage";
+import { db } from "./db";
+import { assets, jobs } from "@shared/schema";
+import { isNull } from "drizzle-orm";
 import type { User } from "@shared/schema";
 
 const scryptAsync = promisify(scrypt);
@@ -191,16 +194,22 @@ export function setupAuth(app: Express) {
 
 async function seedAdmin() {
   try {
-    const existing = await storage.getUserByUsername("admin");
-    if (!existing) {
+    let admin = await storage.getUserByUsername("admin");
+    if (!admin) {
       const hashed = await hashPassword("admin123");
-      await storage.createUser({
+      admin = await storage.createUser({
         username: "admin",
         password: hashed,
         role: "admin",
         status: "approved",
       });
       console.log("Default admin account created (username: admin, password: admin123)");
+    }
+
+    const orphanAssets = await db.update(assets).set({ userId: admin.id }).where(isNull(assets.userId)).returning({ id: assets.id });
+    const orphanJobs = await db.update(jobs).set({ userId: admin.id }).where(isNull(jobs.userId)).returning({ id: jobs.id });
+    if (orphanAssets.length > 0 || orphanJobs.length > 0) {
+      console.log(`Migrated ${orphanAssets.length} orphan assets and ${orphanJobs.length} orphan jobs to admin`);
     }
   } catch (err) {
     console.error("Failed to seed admin:", err);

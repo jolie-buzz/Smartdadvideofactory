@@ -42,9 +42,9 @@ interface PendingShot {
 const MAX_FILE_SIZE_MB = 150;
 
 const OPENAI_MODELS = [
-  { id: "gpt-4o", name: "GPT-4o (recommended)" },
+  { id: "gpt-4.1", name: "GPT-4.1 (recommended)" },
+  { id: "gpt-4o", name: "GPT-4o" },
   { id: "gpt-4o-mini", name: "GPT-4o Mini (faster, cheaper)" },
-  { id: "gpt-4.1", name: "GPT-4.1" },
   { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
   { id: "gpt-4.1-nano", name: "GPT-4.1 Nano (fastest)" },
 ];
@@ -135,8 +135,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [video, setVideo] = useState<File | null>(null);
   const [voiceId, setVoiceId] = useState("");
   const [voiceName, setVoiceName] = useState("");
-  const [openaiModel, setOpenaiModel] = useState("gpt-4o");
-  const [elevenlabsModel, setElevenlabsModel] = useState("eleven_multilingual_v2");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4.1");
+  const [elevenlabsModel, setElevenlabsModel] = useState("eleven_turbo_v2_5");
   const [useEnhance, setUseEnhance] = useState(true);
   const [thresholdDb, setThresholdDb] = useState(-35);
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
@@ -147,13 +147,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [autoCaptions, setAutoCaptions] = useState(false);
   const [hookHeadline, setHookHeadline] = useState(false);
   const [hookPrompt, setHookPrompt] = useState("");
-  const [hookModel, setHookModel] = useState("gpt-4o");
+  const [hookModel, setHookModel] = useState("gpt-4.1");
   const [captionEnabled, setCaptionEnabled] = useState(false);
   const [captionPrompt, setCaptionPrompt] = useState("");
-  const [captionModel, setCaptionModel] = useState("gpt-4o");
+  const [captionModel, setCaptionModel] = useState("gpt-4.1");
   const [seoEnabled, setSeoEnabled] = useState(false);
   const [seoPrompt, setSeoPrompt] = useState("");
-  const [seoModel, setSeoModel] = useState("gpt-4o");
+  const [seoModel, setSeoModel] = useState("gpt-4.1");
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -221,8 +221,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setPersonaPrompt(editingAsset.personaPrompt);
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
-      setOpenaiModel(editingAsset.openaiModel || "gpt-4o");
-      setElevenlabsModel(editingAsset.elevenlabsModel || "eleven_multilingual_v2");
+      setOpenaiModel(editingAsset.openaiModel || "gpt-4.1");
+      setElevenlabsModel(editingAsset.elevenlabsModel || "eleven_turbo_v2_5");
       setUseEnhance(editingAsset.useEnhance !== undefined ? editingAsset.useEnhance : true);
       setThresholdDb(editingAsset.thresholdDb);
       setRemoveSilencesLongerThan(editingAsset.removeSilencesLongerThan);
@@ -232,13 +232,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setAutoCaptions(editingAsset.autoCaptions ?? false);
       setHookHeadline(editingAsset.hookHeadline ?? false);
       setHookPrompt(editingAsset.hookPrompt || "");
-      setHookModel(editingAsset.hookModel || "gpt-4o");
+      setHookModel(editingAsset.hookModel || "gpt-4.1");
       setCaptionEnabled(editingAsset.captionEnabled ?? false);
       setCaptionPrompt(editingAsset.captionPrompt || "");
-      setCaptionModel(editingAsset.captionModel || "gpt-4o");
+      setCaptionModel(editingAsset.captionModel || "gpt-4.1");
       setSeoEnabled(editingAsset.seoEnabled ?? false);
       setSeoPrompt(editingAsset.seoPrompt || "");
-      setSeoModel(editingAsset.seoModel || "gpt-4o");
+      setSeoModel(editingAsset.seoModel || "gpt-4.1");
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -491,8 +491,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setMusic(null);
       setVoiceId("");
       setVoiceName("");
-      setOpenaiModel("gpt-4o");
-      setElevenlabsModel("eleven_multilingual_v2");
+      setOpenaiModel("gpt-4.1");
+      setElevenlabsModel("eleven_turbo_v2_5");
       setUseEnhance(true);
       setVoiceVolume(1.0);
       setMusicVolume(0.3);

@@ -989,6 +989,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings", requireAuth, async (req, res) => {
+    try {
+      const excludedWords = await storage.getExcludedWords(req.user!.id);
+      res.json({ excludedWords });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/settings", requireAuth, async (req, res) => {
+    try {
+      const { excludedWords } = req.body;
+      await storage.updateExcludedWords(req.user!.id, excludedWords ?? "");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   startWorker();
 
   return httpServer;

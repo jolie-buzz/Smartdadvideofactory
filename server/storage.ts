@@ -9,6 +9,8 @@ export interface IStorage {
   getUsers(): Promise<User[]>;
   updateUser(id: number, data: Partial<InsertUser>): Promise<User | undefined>;
   deleteUser(id: number): Promise<void>;
+  getExcludedWords(userId: number): Promise<string | null>;
+  updateExcludedWords(userId: number, words: string): Promise<void>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: number, data: Partial<InsertAsset>): Promise<Asset | undefined>;
   getAssets(userId?: number): Promise<Asset[]>;
@@ -61,6 +63,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUser(id: number): Promise<void> {
     await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getExcludedWords(userId: number): Promise<string | null> {
+    const [result] = await db.select({ excludedWords: users.excludedWords }).from(users).where(eq(users.id, userId));
+    return result?.excludedWords ?? null;
+  }
+
+  async updateExcludedWords(userId: number, words: string): Promise<void> {
+    await db.update(users).set({ excludedWords: words }).where(eq(users.id, userId));
   }
 
   async createAsset(asset: InsertAsset): Promise<Asset> {

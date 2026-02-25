@@ -194,6 +194,14 @@ export function setupAuth(app: Express) {
 
 async function seedAdmin() {
   try {
+    await db.execute(
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS excluded_words TEXT` as any
+    );
+  } catch (err) {
+    // column may already exist, ignore
+  }
+
+  try {
     let admin = await storage.getUserByUsername("admin");
     if (!admin) {
       const hashed = await hashPassword("admin123");

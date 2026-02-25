@@ -91,6 +91,7 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-25: Added "Excluded Words" global setting per user — a Settings tab in the main UI where users enter words/phrases that must never appear in generated scripts. Stored in the `excluded_words` column on the `users` table, fetched at job runtime and injected into the OpenAI system prompt. Applies to all setups and future jobs automatically. Production migration runs via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on server startup.
 - 2026-02-25: Added user authentication system with admin approval flow, per-user data isolation, admin dashboard (manage users, approve/restrict, create accounts, edit usernames, reset passwords), change password dialog, duplicate setup button, and photo/video file replacement in edit mode.
 - 2026-02-24: Converted hook headline from video overlay to text-only output with copy button. Added Social Media Caption generator and SEO Keywords/Hashtags generator — each with own toggle, prompt, model selector, and copy button in job results. Removed FFmpeg headline overlay and font styling options.
 - 2026-02-24: Fixed hook headline timeout (600s + ultrafast preset for large videos), fixed download freeze (blob-based download with loading spinner instead of cross-origin a.click), added hookEffect selector (none/border/shadow/glow)

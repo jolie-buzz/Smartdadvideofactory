@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { SetupForm } from "@/components/setup-form";
 import { SetupsList } from "@/components/setups-list";
 import { JobsList } from "@/components/jobs-list";
@@ -7,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Settings, Zap, Video, FolderOpen, LogOut, User, Shield, KeyRound } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -24,6 +27,31 @@ export default function Home() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [excludedWordsInput, setExcludedWordsInput] = useState("");
+
+  const settingsQuery = useQuery<{ excludedWords: string | null }>({
+    queryKey: ["/api/settings"],
+  });
+
+  useEffect(() => {
+    if (settingsQuery.data) {
+      setExcludedWordsInput(settingsQuery.data.excludedWords ?? "");
+    }
+  }, [settingsQuery.data]);
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: async (data: { excludedWords: string }) => {
+      const res = await apiRequest("PATCH", "/api/settings", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      toast({ title: "Settings saved", description: "Excluded words updated. Will apply to all future jobs." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
 
   const changePasswordMutation = useMutation({
     mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
@@ -115,7 +143,7 @@ export default function Home() {
 
       <main className="max-w-6xl mx-auto px-4 py-6">
         <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); if (v !== "setup") setEditingAsset(null); }} className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-3 mx-auto">
+          <TabsList className="grid w-full max-w-xl grid-cols-4 mx-auto">
             <TabsTrigger value="setup" className="gap-2" data-testid="tab-setup">
               <Settings className="w-4 h-4" />
               {editingAsset ? "Edit" : "New Setup"}
@@ -127,6 +155,10 @@ export default function Home() {
             <TabsTrigger value="jobs" className="gap-2" data-testid="tab-jobs">
               <Zap className="w-4 h-4" />
               Jobs
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="gap-2" data-testid="tab-settings">
+              <KeyRound className="w-4 h-4" />
+              Settings
             </TabsTrigger>
           </TabsList>
 
@@ -144,6 +176,36 @@ export default function Home() {
 
           <TabsContent value="jobs">
             <JobsList />
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <div className="max-w-2xl mx-auto space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Excluded Words</CardTitle>
+                  <CardDescription>
+                    Words or phrases listed here will never appear in any generated voiceover script. This applies to all setups and all future jobs. Enter one per line or separate with commas.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Textarea
+                    data-testid="input-excluded-words"
+                    placeholder={"e.g.\nsuper, amazing, revolutionary\ngame-changer\nunbelievable"}
+                    value={excludedWordsInput}
+                    onChange={(e) => setExcludedWordsInput(e.target.value)}
+                    rows={8}
+                    disabled={settingsQuery.isLoading || saveSettingsMutation.isPending}
+                  />
+                  <Button
+                    data-testid="button-save-settings"
+                    onClick={() => saveSettingsMutation.mutate({ excludedWords: excludedWordsInput })}
+                    disabled={saveSettingsMutation.isPending || settingsQuery.isLoading}
+                  >
+                    {saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>

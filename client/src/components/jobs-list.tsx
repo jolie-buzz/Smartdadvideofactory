@@ -3,6 +3,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -249,6 +250,7 @@ export function JobsList() {
   const { toast } = useToast();
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const toggleExpanded = (id: number) => {
     setExpandedJobs((prev) => {
@@ -305,6 +307,21 @@ export function JobsList() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       toast({ title: "Deleted", description: "Job has been removed." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const clearAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", "/api/jobs");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setShowClearConfirm(false);
+      toast({ title: "All jobs cleared", description: `${data.deleted} job${data.deleted !== 1 ? "s" : ""} removed.` });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -396,6 +413,17 @@ export function JobsList() {
             </Badge>
           )}
           <Badge variant="secondary">{jobsQuery.data.length} job{jobsQuery.data.length !== 1 ? "s" : ""}</Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={clearAllMutation.isPending}
+            data-testid="button-clear-all-jobs"
+            className="gap-1.5 text-destructive hover:text-destructive"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear All
+          </Button>
         </div>
       </div>
 
@@ -669,6 +697,35 @@ export function JobsList() {
           </Card>
         );
       })}
+
+      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear All Jobs</DialogTitle>
+            <DialogDescription>
+              This will permanently delete all your jobs and cannot be undone. Are you sure?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowClearConfirm(false)}
+              disabled={clearAllMutation.isPending}
+              data-testid="button-cancel-clear-all"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => clearAllMutation.mutate()}
+              disabled={clearAllMutation.isPending}
+              data-testid="button-confirm-clear-all"
+            >
+              {clearAllMutation.isPending ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Clearing...</> : "Yes, Clear All"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -22,6 +22,7 @@ export interface IStorage {
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
   appendJobLog(id: number, message: string): Promise<void>;
   deleteJob(id: number): Promise<void>;
+  deleteAllJobs(userId: number): Promise<number>;
   getJobByShareToken(token: string): Promise<Job | undefined>;
   createShot(shot: InsertShot): Promise<Shot>;
   getShots(assetId: number): Promise<Shot[]>;
@@ -147,6 +148,11 @@ export class DatabaseStorage implements IStorage {
 
   async deleteJob(id: number): Promise<void> {
     await db.delete(jobs).where(eq(jobs.id, id));
+  }
+
+  async deleteAllJobs(userId: number): Promise<number> {
+    const deleted = await db.delete(jobs).where(eq(jobs.userId, userId)).returning({ id: jobs.id });
+    return deleted.length;
   }
 
   async getJobByShareToken(token: string): Promise<Job | undefined> {

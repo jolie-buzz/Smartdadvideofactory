@@ -351,6 +351,15 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/jobs", requireAuth, async (req, res) => {
+    try {
+      const count = await storage.deleteAllJobs(req.user!.id);
+      res.json({ deleted: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/jobs/:id", requireAuth, async (req, res) => {
     try {
       const job = await storage.getJob(parseInt(req.params.id));

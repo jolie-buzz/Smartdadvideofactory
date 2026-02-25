@@ -197,11 +197,38 @@ function CopyTextButton({ text, label, jobId, field }: { text: string; label: st
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast({ title: "Copied!", description: `${label} copied to clipboard.` });
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "-9999px";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+          const successful = document.execCommand('copy');
+          if (!successful) throw new Error("execCommand copy failed");
+        } catch (err) {
+          console.error('Fallback copy failed', err);
+          throw err;
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+      setCopied(true);
+      toast({ title: "Copied!", description: `${label} copied to clipboard.` });
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Copy failed', err);
+      toast({ title: "Copy failed", description: "Please copy manually", variant: "destructive" });
+    }
   };
 
   return (
@@ -297,12 +324,30 @@ export function JobsList() {
     },
   });
 
-  const copyShareLink = (token: string) => {
+  const copyShareLink = async (token: string) => {
     const url = `${window.location.origin}/s/${token}`;
-    navigator.clipboard.writeText(url);
-    setCopiedToken(token);
-    toast({ title: "Copied", description: "Share link copied to clipboard." });
-    setTimeout(() => setCopiedToken(null), 2000);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = url;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "-9999px";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedToken(token);
+      toast({ title: "Copied", description: "Share link copied to clipboard." });
+      setTimeout(() => setCopiedToken(null), 2000);
+    } catch (err) {
+      toast({ title: "Copy failed", description: "Please copy manually", variant: "destructive" });
+    }
   };
 
   if (jobsQuery.isLoading) {

@@ -389,6 +389,28 @@ export async function registerRoutes(
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (!job.finalVideoKey) return res.status(400).json({ error: "Final video not yet available" });
       const url = await getSignedDownloadUrl(job.finalVideoKey, `job-${job.id}-final.mp4`);
+      res.redirect(url);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/jobs/:id/preview-audio-raw", requireAuth, async (req, res) => {
+    try {
+      const job = await storage.getJob(parseInt(req.params.id));
+      if (!job || !job.audioRawKey) return res.status(404).json({ error: "Raw audio not available" });
+      const url = await getSignedDownloadUrl(job.audioRawKey);
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/jobs/:id/preview-audio-clean", requireAuth, async (req, res) => {
+    try {
+      const job = await storage.getJob(parseInt(req.params.id));
+      if (!job || !job.audioCleanKey) return res.status(404).json({ error: "Clean audio not available" });
+      const url = await getSignedDownloadUrl(job.audioCleanKey);
       res.json({ url });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -400,7 +422,7 @@ export async function registerRoutes(
       const job = await storage.getJob(parseInt(req.params.id));
       if (!job || !job.audioRawKey) return res.status(404).json({ error: "Raw audio not available" });
       const url = await getSignedDownloadUrl(job.audioRawKey, `job-${job.id}-voice-raw.mp3`);
-      res.json({ url });
+      res.redirect(url);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -411,7 +433,7 @@ export async function registerRoutes(
       const job = await storage.getJob(parseInt(req.params.id));
       if (!job || !job.audioCleanKey) return res.status(404).json({ error: "Clean audio not available" });
       const url = await getSignedDownloadUrl(job.audioCleanKey, `job-${job.id}-voice-clean.mp3`);
-      res.json({ url });
+      res.redirect(url);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

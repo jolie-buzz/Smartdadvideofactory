@@ -76,8 +76,8 @@ function AudioPlayer({ jobId, type, label }: { jobId: number; type: "raw" | "cle
     setError(null);
     try {
       const endpoint = type === "raw"
-        ? `/api/jobs/${jobId}/download-audio-raw`
-        : `/api/jobs/${jobId}/download-audio-clean`;
+        ? `/api/jobs/${jobId}/preview-audio-raw`
+        : `/api/jobs/${jobId}/preview-audio-clean`;
       const res = await fetch(endpoint);
       if (!res.ok) throw new Error("Failed to load audio");
       const data = await res.json();
@@ -126,7 +126,11 @@ function VideoPreview({ jobId }: { jobId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  const loadPreview = async () => {
+  const openPreview = async () => {
+    if (videoUrl) {
+      setOpen(true);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -151,7 +155,7 @@ function VideoPreview({ jobId }: { jobId: number }) {
       <Button
         size="sm"
         variant="outline"
-        onClick={loadPreview}
+        onClick={openPreview}
         disabled={loading}
         data-testid={`button-preview-${jobId}`}
       >
@@ -179,8 +183,9 @@ function VideoPreview({ jobId }: { jobId: number }) {
             </Button>
             <div className="p-4">
               <video
+                key={videoUrl}
                 controls
-                autoPlay
+                preload="metadata"
                 className="w-full rounded"
                 data-testid={`video-preview-${jobId}`}
               >
@@ -270,35 +275,14 @@ export function JobsList() {
     (j) => !["done", "failed"].includes(j.status)
   );
 
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
-  const downloadMutation = useMutation({
-    mutationFn: async ({ jobId, type }: { jobId: number; type: "final" | "raw" | "clean" }) => {
-      const dlKey = `${jobId}-${type}`;
-      setDownloadingId(dlKey);
-      const endpoint = type === "final"
-        ? `/api/jobs/${jobId}/download`
-        : type === "raw"
-        ? `/api/jobs/${jobId}/download-audio-raw`
-        : `/api/jobs/${jobId}/download-audio-clean`;
-      const res = await apiRequest("GET", endpoint);
-      const data = await res.json();
-      const a = document.createElement("a");
-      a.href = data.url;
-      a.target = "_self";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      return data;
-    },
-    onSuccess: () => {
-      setDownloadingId(null);
-    },
-    onError: (err: Error) => {
-      setDownloadingId(null);
-      toast({ title: "Download Error", description: err.message, variant: "destructive" });
-    },
-  });
+  const handleDownload = (jobId: number, type: "final" | "raw" | "clean") => {
+    const endpoint = type === "final"
+      ? `/api/jobs/${jobId}/download`
+      : type === "raw"
+      ? `/api/jobs/${jobId}/download-audio-raw`
+      : `/api/jobs/${jobId}/download-audio-clean`;
+    window.open(endpoint, "_blank");
+  };
 
   const deleteJobMutation = useMutation({
     mutationFn: async (jobId: number) => {
@@ -469,15 +453,10 @@ export function JobsList() {
                       <VideoPreview jobId={job.id} />
                       <Button
                         size="sm"
-                        onClick={() => downloadMutation.mutate({ jobId: job.id, type: "final" })}
-                        disabled={downloadMutation.isPending}
+                        onClick={() => handleDownload(job.id, "final")}
                         data-testid={`button-download-${job.id}`}
                       >
-                        {downloadingId === `${job.id}-final` ? (
-                          <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Downloading...</>
-                        ) : (
-                          <><Download className="w-4 h-4 mr-1" /> Video</>
-                        )}
+                        <Download className="w-4 h-4 mr-1" /> Video
                       </Button>
                     </>
                   )}
@@ -632,30 +611,20 @@ export function JobsList() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => downloadMutation.mutate({ jobId: job.id, type: "raw" })}
-                        disabled={downloadMutation.isPending}
+                        onClick={() => handleDownload(job.id, "raw")}
                         data-testid={`button-download-raw-${job.id}`}
                       >
-                        {downloadingId === `${job.id}-raw` ? (
-                          <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Downloading...</>
-                        ) : (
-                          <><Download className="w-3 h-3 mr-1" /> Raw Audio</>
-                        )}
+                        <Download className="w-3 h-3 mr-1" /> Raw Audio
                       </Button>
                     )}
                     {job.audioCleanKey && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => downloadMutation.mutate({ jobId: job.id, type: "clean" })}
-                        disabled={downloadMutation.isPending}
+                        onClick={() => handleDownload(job.id, "clean")}
                         data-testid={`button-download-clean-${job.id}`}
                       >
-                        {downloadingId === `${job.id}-clean` ? (
-                          <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Downloading...</>
-                        ) : (
-                          <><Download className="w-3 h-3 mr-1" /> Clean Audio</>
-                        )}
+                        <Download className="w-3 h-3 mr-1" /> Clean Audio
                       </Button>
                     )}
                   </div>

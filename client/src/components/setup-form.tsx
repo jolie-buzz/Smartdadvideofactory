@@ -171,8 +171,11 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [replacePhotoProgress, setReplacePhotoProgress] = useState(0);
   const [replaceVideoUploading, setReplaceVideoUploading] = useState(false);
   const [replaceVideoProgress, setReplaceVideoProgress] = useState(0);
+  const [replaceMusicUploading, setReplaceMusicUploading] = useState(false);
+  const [replaceMusicProgress, setReplaceMusicProgress] = useState(0);
   const replacePhotoInputRef = useRef<HTMLInputElement>(null);
   const replaceVideoInputRef = useRef<HTMLInputElement>(null);
+  const replaceMusicInputRef = useRef<HTMLInputElement>(null);
 
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceR2Key, setSourceR2Key] = useState<string | null>(null);
@@ -518,17 +521,33 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     setVoiceName(voice?.name || "");
   };
 
-  const handleReplaceFile = async (file: File, type: "photo" | "video") => {
+  const handleReplaceFile = async (file: File, type: "photo" | "video" | "music") => {
     if (!editingAsset) return;
-    const isPhoto = type === "photo";
-    const setUploading = isPhoto ? setReplacePhotoUploading : setReplaceVideoUploading;
-    const setProgress = isPhoto ? setReplacePhotoProgress : setReplaceVideoProgress;
+    const setUploading = type === "photo" ? setReplacePhotoUploading : type === "video" ? setReplaceVideoUploading : setReplaceMusicUploading;
+    const setProgress = type === "photo" ? setReplacePhotoProgress : type === "video" ? setReplaceVideoProgress : setReplaceMusicProgress;
 
     setUploading(true);
     setProgress(0);
     try {
       const result = await uploadFileWithProgress(file, type, String(editingAsset.id), setProgress);
-      const patchBody: Record<string, string> = isPhoto ? { photoKey: result.key } : { videoKey: result.key };
+      let finalKey = result.key;
+
+      if (type === "music" && file.type.startsWith("video/")) {
+        const convertRes = await fetch("/api/convert-music", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ r2Key: finalKey }),
+        });
+        if (!convertRes.ok) throw new Error("Failed to convert video to audio");
+        const { audioKey } = await convertRes.json();
+        finalKey = audioKey;
+      }
+
+      const patchBody: Record<string, string> = type === "photo"
+        ? { photoKey: result.key }
+        : type === "video"
+        ? { videoKey: result.key }
+        : { musicKey: finalKey };
       const res = await fetch(`/api/assets/${editingAsset.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -539,14 +558,16 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
         throw new Error(errData.error || `Failed to update ${type}`);
       }
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
-      toast({ title: `${isPhoto ? "Photo" : "Video"} replaced`, description: `Your ${type} has been replaced successfully.` });
+      const label = type === "photo" ? "Photo" : type === "video" ? "Video" : "Music";
+      toast({ title: `${label} replaced`, description: `Your ${type} has been replaced successfully.` });
     } catch (err: any) {
       toast({ title: "Replace error", description: err.message, variant: "destructive" });
     } finally {
       setUploading(false);
       setProgress(0);
-      if (isPhoto && replacePhotoInputRef.current) replacePhotoInputRef.current.value = "";
-      if (!isPhoto && replaceVideoInputRef.current) replaceVideoInputRef.current.value = "";
+      if (type === "photo" && replacePhotoInputRef.current) replacePhotoInputRef.current.value = "";
+      if (type === "video" && replaceVideoInputRef.current) replaceVideoInputRef.current.value = "";
+      if (type === "music" && replaceMusicInputRef.current) replaceMusicInputRef.current.value = "";
     }
   };
 
@@ -958,6 +979,58 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                   <div className="space-y-1">
                     <Progress value={replaceVideoProgress} className="h-2" />
                     <p className="text-xs text-muted-foreground">Uploading new video... {replaceVideoProgress}%</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Background Music</Label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    {editingAsset?.musicKey ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        Music uploaded
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-4 h-4 text-muted-foreground">—</span>
+                        No music
+                      </>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={replaceMusicInputRef}
+                      type="file"
+                      accept="audio/*,video/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleReplaceFile(f, "music");
+                      }}
+                      data-testid="input-replace-music"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => replaceMusicInputRef.current?.click()}
+                      disabled={replacePhotoUploading || replaceVideoUploading || replaceMusicUploading}
+                      data-testid="button-replace-music"
+                    >
+                      {replaceMusicUploading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      {editingAsset?.musicKey ? "Replace" : "Add"}
+                    </Button>
+                  </div>
+                </div>
+                {replaceMusicUploading && (
+                  <div className="space-y-1">
+                    <Progress value={replaceMusicProgress} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Uploading music... {replaceMusicProgress}%</p>
                   </div>
                 )}
               </div>

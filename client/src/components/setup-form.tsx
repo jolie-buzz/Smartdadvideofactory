@@ -167,6 +167,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   const [shotUploading, setShotUploading] = useState(false);
   const [shotUploadProgress, setShotUploadProgress] = useState(0);
 
+  const [replacePhotoUploading, setReplacePhotoUploading] = useState(false);
+  const [replacePhotoProgress, setReplacePhotoProgress] = useState(0);
+  const [replaceVideoUploading, setReplaceVideoUploading] = useState(false);
+  const [replaceVideoProgress, setReplaceVideoProgress] = useState(0);
+  const replacePhotoInputRef = useRef<HTMLInputElement>(null);
+  const replaceVideoInputRef = useRef<HTMLInputElement>(null);
+
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceR2Key, setSourceR2Key] = useState<string | null>(null);
   const [sourceUploading, setSourceUploading] = useState(false);
@@ -511,6 +518,38 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
     setVoiceName(voice?.name || "");
   };
 
+  const handleReplaceFile = async (file: File, type: "photo" | "video") => {
+    if (!editingAsset) return;
+    const isPhoto = type === "photo";
+    const setUploading = isPhoto ? setReplacePhotoUploading : setReplaceVideoUploading;
+    const setProgress = isPhoto ? setReplacePhotoProgress : setReplaceVideoProgress;
+
+    setUploading(true);
+    setProgress(0);
+    try {
+      const result = await uploadFileWithProgress(file, type, String(editingAsset.id), setProgress);
+      const patchBody: Record<string, string> = isPhoto ? { photoKey: result.key } : { videoKey: result.key };
+      const res = await fetch(`/api/assets/${editingAsset.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patchBody),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to update ${type}`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      toast({ title: `${isPhoto ? "Photo" : "Video"} replaced`, description: `Your ${type} has been replaced successfully.` });
+    } catch (err: any) {
+      toast({ title: "Replace error", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+      setProgress(0);
+      if (isPhoto && replacePhotoInputRef.current) replacePhotoInputRef.current.value = "";
+      if (!isPhoto && replaceVideoInputRef.current) replaceVideoInputRef.current.value = "";
+    }
+  };
+
   const canSave = isEditing
     ? name && personaPrompt && voiceId
     : name && personaPrompt && photo && (videoSource === "builder" ? pendingShots.length > 0 : !!video) && voiceId;
@@ -553,7 +592,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           </CardTitle>
           <CardDescription>
             {isEditing
-              ? "Update your setup settings. Photo and video cannot be changed."
+              ? "Update your setup settings. You can replace the photo and video files below."
               : "Upload your product photo and edited video, configure your persona and voice settings."}
           </CardDescription>
         </CardHeader>
@@ -833,6 +872,96 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 </div>
               )}
             </>
+          )}
+
+          {isEditing && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Product Photo</Label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    Photo uploaded
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={replacePhotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleReplaceFile(f, "photo");
+                      }}
+                      data-testid="input-replace-photo"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => replacePhotoInputRef.current?.click()}
+                      disabled={replacePhotoUploading || replaceVideoUploading}
+                      data-testid="button-replace-photo"
+                    >
+                      {replacePhotoUploading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Replace
+                    </Button>
+                  </div>
+                </div>
+                {replacePhotoUploading && (
+                  <div className="space-y-1">
+                    <Progress value={replacePhotoProgress} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Uploading new photo... {replacePhotoProgress}%</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Video</Label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    Video uploaded
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={replaceVideoInputRef}
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleReplaceFile(f, "video");
+                      }}
+                      data-testid="input-replace-video"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => replaceVideoInputRef.current?.click()}
+                      disabled={replacePhotoUploading || replaceVideoUploading}
+                      data-testid="button-replace-video"
+                    >
+                      {replaceVideoUploading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Replace
+                    </Button>
+                  </div>
+                </div>
+                {replaceVideoUploading && (
+                  <div className="space-y-1">
+                    <Progress value={replaceVideoProgress} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Uploading new video... {replaceVideoProgress}%</p>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           <div className="space-y-2">

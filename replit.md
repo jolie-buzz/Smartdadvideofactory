@@ -17,31 +17,47 @@ AI-powered video production pipeline for content creators. Users create "setups"
 ### Project Structure
 ```
 client/src/
-  pages/home.tsx          - Main app page with tabs (Setup, Setups, Jobs, Builder)
+  pages/
+    home.tsx              - Main app page with tabs (Setup, Setups, Jobs)
+    auth.tsx              - Login/register page
+    admin.tsx             - Admin dashboard (user management)
+  hooks/
+    use-auth.ts           - Auth state hook (login, register, logout, current user)
   components/
-    setup-form.tsx        - Create/edit setup form with Video Source selector
-    setups-list.tsx       - List saved setups with activate/builder buttons
+    setup-form.tsx        - Create/edit setup form with Video Source selector, file replace
+    setups-list.tsx       - List saved setups with activate/duplicate/edit/delete
     jobs-list.tsx         - Jobs dashboard with status, downloads, sharing
     video-builder.tsx     - Shot library uploader, variant generation, rendering
 
 server/
   index.ts               - Express server entry
-  routes.ts              - API routes (assets, jobs, shots, variants)
-  storage.ts             - Database CRUD operations
+  auth.ts                - Passport auth, session storage, login/register/logout routes
+  routes.ts              - API routes (assets, jobs, shots, variants, admin)
+  storage.ts             - Database CRUD operations (users, assets, jobs, shots, variants)
   db.ts                  - PostgreSQL connection
   r2.ts                  - Cloudflare R2 storage operations
   worker.ts              - Background job processing pipeline
   video-builder.ts       - FFmpeg variant rendering (concat shots)
 
 shared/
-  schema.ts              - Drizzle schema (assets, jobs, shots, variants tables)
+  schema.ts              - Drizzle schema (users, assets, jobs, shots, variants tables)
 ```
 
 ### Database Tables
-- **assets**: Setups with photo/video keys, persona, voice, model settings, volume levels, feature toggles, videoSource (edited|builder)
-- **jobs**: Processing jobs linked to assets with status, outputs, sharing
+- **users**: User accounts with username, hashed password, role (admin|user), status (approved|pending|restricted)
+- **assets**: Setups with photo/video keys, persona, voice, model settings, volume levels, feature toggles, videoSource (edited|builder), userId for ownership
+- **jobs**: Processing jobs linked to assets with status, outputs, sharing, userId for ownership
 - **shots**: Shot clips for Video Builder with category, shotType, duration, R2 key
 - **variants**: Generated video variants with template, clip IDs, rendered R2 key
+
+### Authentication & Authorization
+- Passport.js with local strategy, sessions stored in PostgreSQL via connect-pg-simple
+- Default admin account seeded on first run (admin / admin123)
+- New registrations require admin approval (status: pending)
+- All API routes (except /api/auth/* and /s/:token share links) require authentication
+- Per-user data isolation: each user only sees their own setups and jobs
+- Admin dashboard: approve/restrict users, create accounts, edit usernames, reset passwords
+- Users can change their own password via the header key icon
 
 ### Pipeline Flow
 1. **Setup**: Upload photo + video (or choose Video Builder) + optional music to R2 (presigned URLs), save persona prompt + voice/model settings + volume levels + feature toggles to DB
@@ -75,6 +91,7 @@ shared/
 - `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
 
 ## Recent Changes
+- 2026-02-25: Added user authentication system with admin approval flow, per-user data isolation, admin dashboard (manage users, approve/restrict, create accounts, edit usernames, reset passwords), change password dialog, duplicate setup button, and photo/video file replacement in edit mode.
 - 2026-02-24: Converted hook headline from video overlay to text-only output with copy button. Added Social Media Caption generator and SEO Keywords/Hashtags generator — each with own toggle, prompt, model selector, and copy button in job results. Removed FFmpeg headline overlay and font styling options.
 - 2026-02-24: Fixed hook headline timeout (600s + ultrafast preset for large videos), fixed download freeze (blob-based download with loading spinner instead of cross-origin a.click), added hookEffect selector (none/border/shadow/glow)
 - 2026-02-24: Hook headline now overlays full video duration (not just 3s), script prompt targets 45s voiceover (80-100 words), hookModel selector added, jobs deletable regardless of status

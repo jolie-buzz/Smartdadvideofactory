@@ -3,6 +3,15 @@ import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb } from 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  role: text("role").notNull().default("user"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -31,12 +40,14 @@ export const assets = pgTable("assets", {
   seoEnabled: boolean("seo_enabled").notNull().default(false),
   seoPrompt: text("seo_prompt"),
   seoModel: text("seo_model").notNull().default("gpt-4o"),
+  userId: integer("user_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const jobs = pgTable("jobs", {
   id: serial("id").primaryKey(),
   assetId: integer("asset_id").notNull().references(() => assets.id),
+  userId: integer("user_id"),
   status: text("status").notNull().default("queued"),
   scriptText: text("script_text"),
   headlineText: text("headline_text"),
@@ -74,6 +85,11 @@ export const variants = pgTable("variants", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertAssetSchema = createInsertSchema(assets).omit({
   id: true,
   createdAt: true,
@@ -94,6 +110,8 @@ export const insertVariantSchema = createInsertSchema(variants).omit({
   createdAt: true,
 });
 
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Job = typeof jobs.$inferSelect;

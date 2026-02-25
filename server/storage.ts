@@ -1,15 +1,21 @@
 import { db } from "./db";
-import { assets, jobs, shots, variants, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant } from "@shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { users, assets, jobs, shots, variants, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant } from "@shared/schema";
+import { eq, desc, inArray, and } from "drizzle-orm";
 
 export interface IStorage {
+  createUser(user: InsertUser): Promise<User>;
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUsers(): Promise<User[]>;
+  updateUser(id: number, data: Partial<InsertUser>): Promise<User | undefined>;
+  deleteUser(id: number): Promise<void>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: number, data: Partial<InsertAsset>): Promise<Asset | undefined>;
-  getAssets(): Promise<Asset[]>;
+  getAssets(userId?: number): Promise<Asset[]>;
   getAsset(id: number): Promise<Asset | undefined>;
   deleteAsset(id: number): Promise<void>;
-  createJob(assetId: number): Promise<Job>;
-  getJobs(): Promise<(Job & { assetName?: string })[]>;
+  createJob(assetId: number, userId?: number): Promise<Job>;
+  getJobs(userId?: number): Promise<(Job & { assetName?: string })[]>;
   getJob(id: number): Promise<Job | undefined>;
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
   appendJobLog(id: number, message: string): Promise<void>;
@@ -29,6 +35,34 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  async createUser(user: InsertUser): Promise<User> {
+    const [result] = await db.insert(users).values(user).returning();
+    return result;
+  }
+
+  async getUser(id: number): Promise<User | undefined> {
+    const [result] = await db.select().from(users).where(eq(users.id, id));
+    return result;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [result] = await db.select().from(users).where(eq(users.username, username));
+    return result;
+  }
+
+  async getUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async updateUser(id: number, data: Partial<InsertUser>): Promise<User | undefined> {
+    const [result] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return result;
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
   async createAsset(asset: InsertAsset): Promise<Asset> {
     const [result] = await db.insert(assets).values(asset).returning();
     return result;
@@ -39,7 +73,10 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getAssets(): Promise<Asset[]> {
+  async getAssets(userId?: number): Promise<Asset[]> {
+    if (userId !== undefined) {
+      return db.select().from(assets).where(eq(assets.userId, userId)).orderBy(desc(assets.createdAt));
+    }
     return db.select().from(assets).orderBy(desc(assets.createdAt));
   }
 
@@ -52,13 +89,13 @@ export class DatabaseStorage implements IStorage {
     await db.delete(assets).where(eq(assets.id, id));
   }
 
-  async createJob(assetId: number): Promise<Job> {
-    const [result] = await db.insert(jobs).values({ assetId, status: "queued" }).returning();
+  async createJob(assetId: number, userId?: number): Promise<Job> {
+    const [result] = await db.insert(jobs).values({ assetId, userId: userId ?? null, status: "queued" }).returning();
     return result;
   }
 
-  async getJobs(): Promise<(Job & { assetName?: string })[]> {
-    const result = await db
+  async getJobs(userId?: number): Promise<(Job & { assetName?: string })[]> {
+    let query = db
       .select({
         job: jobs,
         assetName: assets.name,
@@ -66,6 +103,16 @@ export class DatabaseStorage implements IStorage {
       .from(jobs)
       .leftJoin(assets, eq(jobs.assetId, assets.id))
       .orderBy(desc(jobs.createdAt));
+    if (userId !== undefined) {
+      const result = await db
+        .select({ job: jobs, assetName: assets.name })
+        .from(jobs)
+        .leftJoin(assets, eq(jobs.assetId, assets.id))
+        .where(eq(jobs.userId, userId))
+        .orderBy(desc(jobs.createdAt));
+      return result.map((r) => ({ ...r.job, assetName: r.assetName ?? undefined }));
+    }
+    const result = await query;
     return result.map((r) => ({ ...r.job, assetName: r.assetName ?? undefined }));
   }
 

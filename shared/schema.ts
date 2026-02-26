@@ -76,6 +76,14 @@ export const shots = pgTable("shots", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const scriptPrompts = pgTable("script_prompts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  promptText: text("prompt_text").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const variants = pgTable("variants", {
   id: serial("id").primaryKey(),
   assetId: integer("asset_id").notNull().references(() => assets.id),
@@ -111,6 +119,11 @@ export const insertVariantSchema = createInsertSchema(variants).omit({
   createdAt: true,
 });
 
+export const insertScriptPromptSchema = createInsertSchema(scriptPrompts).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Asset = typeof assets.$inferSelect;
@@ -121,5 +134,7 @@ export type Shot = typeof shots.$inferSelect;
 export type InsertShot = z.infer<typeof insertShotSchema>;
 export type Variant = typeof variants.$inferSelect;
 export type InsertVariant = z.infer<typeof insertVariantSchema>;
+export type ScriptPrompt = typeof scriptPrompts.$inferSelect;
+export type InsertScriptPrompt = z.infer<typeof insertScriptPromptSchema>;
 
 export * from "./models/chat";

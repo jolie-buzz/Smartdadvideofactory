@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, assets, jobs, shots, variants, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant } from "@shared/schema";
-import { eq, desc, inArray, and } from "drizzle-orm";
+import { users, assets, jobs, shots, variants, scriptPrompts, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant, type ScriptPrompt, type InsertScriptPrompt } from "@shared/schema";
+import { eq, desc, inArray, and, asc } from "drizzle-orm";
 
 export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
@@ -35,6 +35,10 @@ export interface IStorage {
   updateVariant(id: number, data: Partial<Variant>): Promise<Variant | undefined>;
   deleteVariant(id: number): Promise<void>;
   getRecentVariantClipIds(assetId: number, limit: number): Promise<number[]>;
+  getScriptPrompts(userId: number): Promise<ScriptPrompt[]>;
+  createScriptPrompt(data: InsertScriptPrompt): Promise<ScriptPrompt>;
+  updateScriptPrompt(id: number, userId: number, data: Partial<InsertScriptPrompt>): Promise<ScriptPrompt | undefined>;
+  deleteScriptPrompt(id: number, userId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -218,6 +222,24 @@ export class DatabaseStorage implements IStorage {
       ids.forEach((id) => allClipIds.add(id));
     }
     return Array.from(allClipIds);
+  }
+
+  async getScriptPrompts(userId: number): Promise<ScriptPrompt[]> {
+    return db.select().from(scriptPrompts).where(eq(scriptPrompts.userId, userId)).orderBy(asc(scriptPrompts.name));
+  }
+
+  async createScriptPrompt(data: InsertScriptPrompt): Promise<ScriptPrompt> {
+    const [result] = await db.insert(scriptPrompts).values(data).returning();
+    return result;
+  }
+
+  async updateScriptPrompt(id: number, userId: number, data: Partial<InsertScriptPrompt>): Promise<ScriptPrompt | undefined> {
+    const [result] = await db.update(scriptPrompts).set(data).where(and(eq(scriptPrompts.id, id), eq(scriptPrompts.userId, userId))).returning();
+    return result;
+  }
+
+  async deleteScriptPrompt(id: number, userId: number): Promise<void> {
+    await db.delete(scriptPrompts).where(and(eq(scriptPrompts.id, id), eq(scriptPrompts.userId, userId)));
   }
 }
 

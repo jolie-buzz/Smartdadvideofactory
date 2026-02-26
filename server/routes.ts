@@ -1020,6 +1020,50 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/script-prompts", requireAuth, async (req, res) => {
+    try {
+      const prompts = await storage.getScriptPrompts(req.user!.id);
+      res.json(prompts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/script-prompts", requireAuth, async (req, res) => {
+    try {
+      const { name, promptText } = req.body;
+      if (!name?.trim() || !promptText?.trim()) return res.status(400).json({ error: "Name and prompt text are required" });
+      const prompt = await storage.createScriptPrompt({ userId: req.user!.id, name: name.trim(), promptText: promptText.trim() });
+      res.json(prompt);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/script-prompts/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { name, promptText } = req.body;
+      const updates: Record<string, string> = {};
+      if (name?.trim()) updates.name = name.trim();
+      if (promptText?.trim()) updates.promptText = promptText.trim();
+      const prompt = await storage.updateScriptPrompt(id, req.user!.id, updates);
+      if (!prompt) return res.status(404).json({ error: "Prompt not found" });
+      res.json(prompt);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/script-prompts/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteScriptPrompt(parseInt(req.params.id), req.user!.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/settings", requireAuth, async (req, res) => {
     try {
       const excludedWords = await storage.getExcludedWords(req.user!.id);

@@ -11,12 +11,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Settings, Zap, Video, FolderOpen, LogOut, User, Shield, KeyRound } from "lucide-react";
+import { Settings, Zap, Video, FolderOpen, LogOut, User, Shield, KeyRound, Plus, Pencil, Trash2, X, Check } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Link } from "wouter";
-import type { Asset } from "@shared/schema";
+import type { Asset, ScriptPrompt } from "@shared/schema";
 
 export default function Home() {
   const { user, logout } = useAuth();
@@ -28,6 +28,62 @@ export default function Home() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [excludedWordsInput, setExcludedWordsInput] = useState("");
+
+  const [showAddPrompt, setShowAddPrompt] = useState(false);
+  const [newPromptName, setNewPromptName] = useState("");
+  const [newPromptText, setNewPromptText] = useState("");
+  const [editingPromptId, setEditingPromptId] = useState<number | null>(null);
+  const [editPromptName, setEditPromptName] = useState("");
+  const [editPromptText, setEditPromptText] = useState("");
+
+  const scriptPromptsQuery = useQuery<ScriptPrompt[]>({
+    queryKey: ["/api/script-prompts"],
+  });
+
+  const createPromptMutation = useMutation({
+    mutationFn: async (data: { name: string; promptText: string }) => {
+      const res = await apiRequest("POST", "/api/script-prompts", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/script-prompts"] });
+      setShowAddPrompt(false);
+      setNewPromptName("");
+      setNewPromptText("");
+      toast({ title: "Prompt saved", description: "Added to your script prompt library." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const updatePromptMutation = useMutation({
+    mutationFn: async ({ id, name, promptText }: { id: number; name: string; promptText: string }) => {
+      const res = await apiRequest("PATCH", `/api/script-prompts/${id}`, { name, promptText });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/script-prompts"] });
+      setEditingPromptId(null);
+      toast({ title: "Prompt updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deletePromptMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/script-prompts/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/script-prompts"] });
+      toast({ title: "Prompt deleted" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
 
   const settingsQuery = useQuery<{ excludedWords: string | null }>({
     queryKey: ["/api/settings"],
@@ -203,6 +259,131 @@ export default function Home() {
                   >
                     {saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}
                   </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Script Prompt Library</CardTitle>
+                  <CardDescription>
+                    Save reusable prompts here. In any setup, you can load one to instantly pre-fill the script prompt field — then edit it freely per product.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {scriptPromptsQuery.isLoading && (
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                  )}
+
+                  {scriptPromptsQuery.data?.map((prompt) => (
+                    <div key={prompt.id} className="border rounded-lg p-3 space-y-2">
+                      {editingPromptId === prompt.id ? (
+                        <>
+                          <Input
+                            value={editPromptName}
+                            onChange={(e) => setEditPromptName(e.target.value)}
+                            placeholder="Prompt name"
+                            data-testid={`input-edit-prompt-name-${prompt.id}`}
+                          />
+                          <Textarea
+                            value={editPromptText}
+                            onChange={(e) => setEditPromptText(e.target.value)}
+                            rows={5}
+                            placeholder="Prompt text..."
+                            data-testid={`input-edit-prompt-text-${prompt.id}`}
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              disabled={updatePromptMutation.isPending}
+                              onClick={() => updatePromptMutation.mutate({ id: prompt.id, name: editPromptName, promptText: editPromptText })}
+                              data-testid={`button-save-prompt-${prompt.id}`}
+                            >
+                              <Check className="w-3 h-3 mr-1" />
+                              {updatePromptMutation.isPending ? "Saving..." : "Save"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingPromptId(null)} data-testid={`button-cancel-edit-prompt-${prompt.id}`}>
+                              <X className="w-3 h-3 mr-1" /> Cancel
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate" data-testid={`text-prompt-name-${prompt.id}`}>{prompt.name}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5" data-testid={`text-prompt-preview-${prompt.id}`}>
+                              {prompt.promptText.slice(0, 120)}{prompt.promptText.length > 120 ? "…" : ""}
+                            </p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => { setEditingPromptId(prompt.id); setEditPromptName(prompt.name); setEditPromptText(prompt.promptText); }}
+                              data-testid={`button-edit-prompt-${prompt.id}`}
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => deletePromptMutation.mutate(prompt.id)}
+                              disabled={deletePromptMutation.isPending}
+                              data-testid={`button-delete-prompt-${prompt.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {scriptPromptsQuery.data?.length === 0 && !showAddPrompt && (
+                    <p className="text-sm text-muted-foreground">No prompts saved yet. Add your first one below.</p>
+                  )}
+
+                  {showAddPrompt ? (
+                    <div className="border rounded-lg p-3 space-y-2 border-dashed">
+                      <Input
+                        value={newPromptName}
+                        onChange={(e) => setNewPromptName(e.target.value)}
+                        placeholder="Prompt name (e.g. Skincare Persona v1)"
+                        data-testid="input-new-prompt-name"
+                      />
+                      <Textarea
+                        value={newPromptText}
+                        onChange={(e) => setNewPromptText(e.target.value)}
+                        rows={5}
+                        placeholder="Write your script prompt here..."
+                        data-testid="input-new-prompt-text"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          disabled={createPromptMutation.isPending || !newPromptName.trim() || !newPromptText.trim()}
+                          onClick={() => createPromptMutation.mutate({ name: newPromptName, promptText: newPromptText })}
+                          data-testid="button-save-new-prompt"
+                        >
+                          <Check className="w-3 h-3 mr-1" />
+                          {createPromptMutation.isPending ? "Saving..." : "Save Prompt"}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setShowAddPrompt(false); setNewPromptName(""); setNewPromptText(""); }} data-testid="button-cancel-new-prompt">
+                          <X className="w-3 h-3 mr-1" /> Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAddPrompt(true)}
+                      data-testid="button-add-prompt"
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Add Prompt
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             </div>

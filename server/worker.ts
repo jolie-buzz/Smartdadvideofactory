@@ -2,7 +2,7 @@ import { storage } from "./storage";
 import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { spawn } from "child_process";
-import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
+import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import OpenAI from "openai";
@@ -100,7 +100,7 @@ async function generateVoice(scriptText: string, voiceId: string, elevenlabsMode
   return Buffer.from(arrayBuffer);
 }
 
-function runFfmpeg(args: string[], timeoutMs: number = 300_000): Promise<string> {
+function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", args);
     let stderr = "";
@@ -126,80 +126,60 @@ function runFfmpeg(args: string[], timeoutMs: number = 300_000): Promise<string>
   });
 }
 
-async function cutDeadAir(
-  audioBuffer: Buffer,
-  thresholdDb: number,
-  removeSilencesLongerThan: number,
-  ignoreDetectionsShorterThan: number,
-  workDir: string
-): Promise<Buffer> {
-  const inputPath = join(workDir, "voice_raw.mp3");
-  const outputPath = join(workDir, "voice_clean.mp3");
-
-  await writeFile(inputPath, audioBuffer);
-
+/**
+ * Single FFmpeg pass: silenceremove voice + mix with video (streamed from R2 URL) + optional music.
+ * No local video download needed — FFmpeg reads directly from the presigned URL.
+ */
+async function combineAllInOne(
+  voicePath: string,
+  videoUrl: string,
+  musicUrl: string | null,
+  outputPath: string,
+  settings: {
+    thresholdDb: number;
+    removeSilencesLongerThan: number;
+    ignoreDetectionsShorterThan: number;
+    voiceVolume: number;
+    musicVolume: number;
+  }
+): Promise<void> {
+  const { thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, voiceVolume, musicVolume } = settings;
   const silenceFilter = `silenceremove=stop_periods=-1:stop_duration=${removeSilencesLongerThan}:stop_threshold=${thresholdDb}dB:window=${ignoreDetectionsShorterThan}`;
 
-  await runFfmpeg([
-    "-i", inputPath,
-    "-af", silenceFilter,
-    "-y",
-    outputPath,
-  ]);
+  const args: string[] = [
+    "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+    "-i", videoUrl,
+    "-i", voicePath,
+  ];
 
-  return readFile(outputPath);
-}
-
-async function combineVideoAudio(
-  videoBuffer: Buffer,
-  audioBuffer: Buffer,
-  workDir: string,
-  musicBuffer?: Buffer | null,
-  voiceVolume: number = 1.0,
-  musicVolume: number = 0.3
-): Promise<Buffer> {
-  const videoPath = join(workDir, "input_video.mp4");
-  const audioPath = join(workDir, "voice_clean.mp3");
-  const outputPath = join(workDir, "final.mp4");
-
-  await writeFile(videoPath, videoBuffer);
-  await writeFile(audioPath, audioBuffer);
-
-  if (musicBuffer) {
-    const musicPath = join(workDir, "music.mp3");
-    await writeFile(musicPath, musicBuffer);
-
-    await runFfmpeg([
-      "-i", videoPath,
-      "-i", audioPath,
-      "-i", musicPath,
+  if (musicUrl) {
+    args.push("-i", musicUrl);
+    args.push(
       "-filter_complex",
-      `[1:a]volume=${voiceVolume}[voice];[2:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop];[voice][musicloop]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+      `[1:a]${silenceFilter},volume=${voiceVolume}[voice];[2:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop];[voice][musicloop]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
       "-map", "0:v:0",
       "-map", "[aout]",
-      "-c:v", "copy",
-      "-c:a", "aac",
-      "-shortest",
-      "-y",
-      outputPath,
-    ]);
+    );
   } else {
-    await runFfmpeg([
-      "-i", videoPath,
-      "-i", audioPath,
+    args.push(
       "-filter_complex",
-      `[1:a]volume=${voiceVolume}[aout]`,
+      `[1:a]${silenceFilter},volume=${voiceVolume}[aout]`,
       "-map", "0:v:0",
       "-map", "[aout]",
-      "-c:v", "copy",
-      "-c:a", "aac",
       "-shortest",
-      "-y",
-      outputPath,
-    ]);
+    );
   }
 
-  return readFile(outputPath);
+  args.push(
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-b:a", "192k",
+    "-movflags", "+faststart",
+    "-y",
+    outputPath,
+  );
+
+  await runFfmpeg(args, 600_000);
 }
 
 async function transcribeAudio(audioBuffer: Buffer, workDir: string): Promise<string> {
@@ -216,29 +196,24 @@ async function transcribeAudio(audioBuffer: Buffer, workDir: string): Promise<st
   return transcription as unknown as string;
 }
 
-async function burnCaptions(
-  videoBuffer: Buffer,
+async function burnCaptionsToFile(
+  inputVideoPath: string,
   srtContent: string,
+  outputVideoPath: string,
   workDir: string
-): Promise<Buffer> {
-  const videoPath = join(workDir, "video_for_captions.mp4");
+): Promise<void> {
   const srtPath = join(workDir, "captions.srt");
-  const outputPath = join(workDir, "video_captioned.mp4");
-
-  await writeFile(videoPath, videoBuffer);
   await writeFile(srtPath, "\uFEFF" + srtContent, "utf-8");
 
   const escapedSrtPath = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:");
 
   await runFfmpeg([
-    "-i", videoPath,
+    "-i", inputVideoPath,
     "-vf", `subtitles='${escapedSrtPath}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=30,FontName=FreeSans'`,
     "-c:a", "copy",
     "-y",
-    outputPath,
+    outputVideoPath,
   ], 180_000);
-
-  return readFile(outputPath);
 }
 
 async function generateHookHeadline(hookPrompt: string | null, photoUrl: string | null, model: string): Promise<string> {
@@ -331,9 +306,13 @@ async function processJob(jobId: number): Promise<void> {
     return;
   }
 
+  // Immediately lock this job so no other poll cycle can re-pick it
+  await storage.updateJob(jobId, { status: "processing" });
+
   const workDir = await mkdtemp(join(tmpdir(), `job-${jobId}-`));
 
   try {
+    // ── Video Builder: auto-generate variant if needed ──────────────────────
     if (asset.videoSource === "builder" && (!asset.videoKey || asset.videoKey === "")) {
       await storage.updateJob(jobId, { status: "building_video" });
       await storage.appendJobLog(jobId, "Video Builder mode: auto-generating variant from shot library...");
@@ -415,7 +394,6 @@ async function processJob(jobId: number): Promise<void> {
       });
 
       await storage.appendJobLog(jobId, `Variant #${variant.id} created with ${clipIds.length} clips. Rendering...`);
-
       await renderVariant(variant.id);
 
       const renderedVariant = await storage.getVariant(variant.id);
@@ -430,6 +408,7 @@ async function processJob(jobId: number): Promise<void> {
       await storage.appendJobLog(jobId, `Video built and ready. Continuing pipeline...`);
     }
 
+    // ── Step 1: Generate script ──────────────────────────────────────────────
     await storage.updateJob(jobId, { status: "generating_script" });
     await storage.appendJobLog(jobId, `Generating script with OpenAI (model: ${asset.openaiModel})...`);
 
@@ -443,111 +422,146 @@ async function processJob(jobId: number): Promise<void> {
 
     const excludedWords = job.userId ? await storage.getExcludedWords(job.userId) : null;
     if (excludedWords && excludedWords.trim()) {
-      await storage.appendJobLog(jobId, `Applying excluded words filter`);
+      await storage.appendJobLog(jobId, "Applying excluded words filter");
     }
+
     const scriptText = await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords);
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);
 
+    if (!asset.voiceId) throw new Error("No voice selected for this asset setup");
+
+    // ── Step 2: Parallel — voice generation + presigned URLs ────────────────
     await storage.updateJob(jobId, { status: "generating_audio" });
-    await storage.appendJobLog(jobId, `Generating voice with ElevenLabs (voice: ${asset.voiceId})...`);
+    await storage.appendJobLog(jobId, `Generating voice (ElevenLabs) + fetching R2 URLs in parallel...`);
 
-    if (!asset.voiceId) {
-      throw new Error("No voice selected for this asset setup");
-    }
+    const [audioRawBuffer, videoUrl, musicUrl] = await Promise.all([
+      generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance),
+      getSignedDownloadUrl(asset.videoKey),
+      asset.musicKey ? getSignedDownloadUrl(asset.musicKey) : Promise.resolve(null),
+    ]);
 
-    const audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance);
+    await storage.appendJobLog(jobId, `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`);
+
+    const voiceRawPath = join(workDir, "voice_raw.mp3");
+    await writeFile(voiceRawPath, audioRawBuffer);
+
     const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
-    await uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg");
-    await storage.updateJob(jobId, { audioRawKey });
-    await storage.appendJobLog(jobId, `Raw audio uploaded (${(audioRawBuffer.length / 1024).toFixed(1)} KB)`);
 
-    await storage.updateJob(jobId, { status: "cutting_dead_air" });
-    await storage.appendJobLog(jobId, `Cutting dead air (threshold: ${asset.thresholdDb}dB, min silence: ${asset.ignoreDetectionsShorterThan}s)...`);
-
-    const audioCleanBuffer = await cutDeadAir(
-      audioRawBuffer,
-      asset.thresholdDb,
-      asset.removeSilencesLongerThan,
-      asset.ignoreDetectionsShorterThan,
-      workDir
-    );
-    const audioCleanKey = `jobs/${jobId}/voice_clean.mp3`;
-    await uploadToR2(audioCleanKey, audioCleanBuffer, "audio/mpeg");
-    await storage.updateJob(jobId, { audioCleanKey });
-    await storage.appendJobLog(jobId, `Clean audio uploaded (${(audioCleanBuffer.length / 1024).toFixed(1)} KB)`);
-
+    // ── Step 3: Parallel — upload raw audio + run combined FFmpeg pass ───────
     await storage.updateJob(jobId, { status: "rendering" });
-    await storage.appendJobLog(jobId, "Downloading video from R2...");
+    await storage.appendJobLog(jobId, `Running combined FFmpeg pass (silenceremove + mix) + uploading raw audio in parallel...`);
 
-    const videoBuffer = await downloadFromR2(asset.videoKey);
+    const finalPath = join(workDir, "final.mp4");
 
-    let musicBuffer: Buffer | null = null;
-    if (asset.musicKey) {
-      await storage.appendJobLog(jobId, "Downloading background music from R2...");
-      musicBuffer = await downloadFromR2(asset.musicKey);
-      await storage.appendJobLog(jobId, `Music downloaded (${(musicBuffer.length / 1024).toFixed(1)} KB)`);
-    }
+    await Promise.all([
+      uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
+      combineAllInOne(voiceRawPath, videoUrl, musicUrl, finalPath, {
+        thresholdDb: asset.thresholdDb,
+        removeSilencesLongerThan: asset.removeSilencesLongerThan,
+        ignoreDetectionsShorterThan: asset.ignoreDetectionsShorterThan,
+        voiceVolume: asset.voiceVolume,
+        musicVolume: asset.musicVolume,
+      }),
+    ]);
 
-    await storage.appendJobLog(jobId, `Combining video + audio (voice vol: ${asset.voiceVolume}, music vol: ${asset.musicVolume})...`);
-    let finalVideoBuffer = await combineVideoAudio(videoBuffer, audioCleanBuffer, workDir, musicBuffer, asset.voiceVolume, asset.musicVolume);
+    await storage.updateJob(jobId, { audioRawKey });
+    await storage.appendJobLog(jobId, "FFmpeg pass complete.");
 
+    // ── Step 4: Auto-captions (optional) ────────────────────────────────────
+    let outputPath = finalPath;
     if (asset.autoCaptions) {
       await storage.appendJobLog(jobId, "Generating captions via AI transcription...");
       try {
-        const srtContent = await transcribeAudio(audioCleanBuffer, workDir);
+        const srtContent = await transcribeAudio(audioRawBuffer, workDir);
         await storage.appendJobLog(jobId, "Burning captions into video...");
-        finalVideoBuffer = await burnCaptions(finalVideoBuffer, srtContent, workDir);
+        const captionedPath = join(workDir, "final_captioned.mp4");
+        await burnCaptionsToFile(finalPath, srtContent, captionedPath, workDir);
+        outputPath = captionedPath;
         await storage.appendJobLog(jobId, "Captions added successfully");
       } catch (err: any) {
         await storage.appendJobLog(jobId, `Warning: Caption generation failed: ${err.message}. Continuing without captions.`);
       }
     }
 
+    // ── Step 5: Parallel AI text outputs ────────────────────────────────────
+    const textTasks: Promise<void>[] = [];
+
     if (asset.hookHeadline) {
-      await storage.appendJobLog(jobId, "Generating hook headline via AI...");
-      try {
-        const headline = await generateHookHeadline(asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
-        await storage.updateJob(jobId, { headlineText: headline });
-        await storage.appendJobLog(jobId, `Hook headline generated: "${headline}"`);
-      } catch (err: any) {
-        await storage.appendJobLog(jobId, `Warning: Headline generation failed: ${err.message}`);
-      }
+      textTasks.push((async () => {
+        try {
+          await storage.appendJobLog(jobId, "Generating hook headline...");
+          const headline = await generateHookHeadline(asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
+          await storage.updateJob(jobId, { headlineText: headline });
+          await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
+        } catch (err: any) {
+          await storage.appendJobLog(jobId, `Warning: Headline failed: ${err.message}`);
+        }
+      })());
     }
 
     if (asset.captionEnabled) {
-      await storage.appendJobLog(jobId, "Generating social media caption via AI...");
-      try {
-        const caption = await generateCaption(asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
-        await storage.updateJob(jobId, { captionText: caption });
-        await storage.appendJobLog(jobId, "Caption generated successfully");
-      } catch (err: any) {
-        await storage.appendJobLog(jobId, `Warning: Caption generation failed: ${err.message}`);
-      }
+      textTasks.push((async () => {
+        try {
+          await storage.appendJobLog(jobId, "Generating social media caption...");
+          const caption = await generateCaption(asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
+          await storage.updateJob(jobId, { captionText: caption });
+          await storage.appendJobLog(jobId, "Caption generated");
+        } catch (err: any) {
+          await storage.appendJobLog(jobId, `Warning: Caption failed: ${err.message}`);
+        }
+      })());
     }
 
     if (asset.seoEnabled) {
-      await storage.appendJobLog(jobId, "Generating SEO keywords & hashtags via AI...");
-      try {
-        const seo = await generateSeoKeywords(asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
-        await storage.updateJob(jobId, { seoText: seo });
-        await storage.appendJobLog(jobId, "SEO keywords generated successfully");
-      } catch (err: any) {
-        await storage.appendJobLog(jobId, `Warning: SEO generation failed: ${err.message}`);
-      }
+      textTasks.push((async () => {
+        try {
+          await storage.appendJobLog(jobId, "Generating SEO keywords & hashtags...");
+          const seo = await generateSeoKeywords(asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
+          await storage.updateJob(jobId, { seoText: seo });
+          await storage.appendJobLog(jobId, "SEO keywords generated");
+        } catch (err: any) {
+          await storage.appendJobLog(jobId, `Warning: SEO failed: ${err.message}`);
+        }
+      })());
     }
 
+    if (textTasks.length > 0) {
+      await storage.appendJobLog(jobId, `Running ${textTasks.length} AI text task(s) in parallel...`);
+      await Promise.all(textTasks);
+    }
+
+    // ── Step 6: Upload final video ───────────────────────────────────────────
+    await storage.appendJobLog(jobId, "Uploading final video to R2...");
+    const finalBuffer = await readFile(outputPath);
     const finalVideoKey = `jobs/${jobId}/final.mp4`;
-    await uploadToR2(finalVideoKey, finalVideoBuffer, "video/mp4");
+    await uploadToR2(finalVideoKey, finalBuffer, "video/mp4");
     await storage.updateJob(jobId, { finalVideoKey, status: "done" });
-    await storage.appendJobLog(jobId, `Final video uploaded (${(finalVideoBuffer.length / 1024 / 1024).toFixed(2)} MB). Done!`);
+    await storage.appendJobLog(jobId, `Done! Final video uploaded (${(finalBuffer.length / 1024 / 1024).toFixed(2)} MB).`);
+
   } catch (err: any) {
     console.error(`Job ${jobId} failed:`, err);
     await storage.updateJob(jobId, { status: "failed" });
     await storage.appendJobLog(jobId, `FAILED: ${err.message || String(err)}`);
   } finally {
-    const { rm } = await import("fs/promises");
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+const TERMINAL_STATUSES = ["queued", "done", "failed"];
+
+async function recoverStuckJobs(): Promise<void> {
+  try {
+    const allJobs = await storage.getJobs();
+    const stuck = allJobs.filter((j) => !TERMINAL_STATUSES.includes(j.status));
+    if (stuck.length === 0) return;
+    console.log(`[worker] Recovering ${stuck.length} stuck job(s)...`);
+    for (const job of stuck) {
+      await storage.updateJob(job.id, { status: "queued" });
+      await storage.appendJobLog(job.id, "Job was interrupted — re-queued automatically on server restart.");
+    }
+  } catch (err) {
+    console.error("[worker] Error recovering stuck jobs:", err);
   }
 }
 
@@ -562,6 +576,8 @@ async function pollJobs() {
     const queued = allJobs.filter((j) => j.status === "queued");
     for (const job of queued) {
       await processJob(job.id);
+      // Brief pause between jobs: lets GC free memory buffers from prior job
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   } catch (err) {
     console.error("Worker poll error:", err);
@@ -572,5 +588,6 @@ async function pollJobs() {
 
 export function startWorker() {
   console.log("[worker] Background worker started (polling every 3s)");
+  recoverStuckJobs();
   setInterval(pollJobs, 3000);
 }

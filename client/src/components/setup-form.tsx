@@ -1044,35 +1044,34 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
           <div className="space-y-2">
             <Label htmlFor="persona-prompt">Persona / Instruction Prompt</Label>
-            {(scriptPromptsQuery.data?.length ?? 0) > 0 && (
-              <div className="flex items-center gap-2">
-                <Select
-                  key={libraryPickerKey}
-                  onValueChange={(val) => {
-                    const chosen = scriptPromptsQuery.data?.find((p) => String(p.id) === val);
-                    if (chosen) {
-                      setPersonaPrompt(chosen.promptText);
-                      setLibraryPickerKey((k) => k + 1);
-                    }
-                  }}
-                  disabled={isUploading}
-                >
-                  <SelectTrigger className="text-sm h-8" data-testid="select-load-prompt">
-                    <SelectValue placeholder="Load from prompt library…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {scriptPromptsQuery.data?.map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)} title={p.promptText}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {scriptPromptsQuery.data?.length === 0 && (
-              <p className="text-xs text-muted-foreground">No saved prompts — add them in Settings to load quickly.</p>
-            )}
+            <div className="flex items-center gap-2">
+              <Select
+                key={libraryPickerKey}
+                onValueChange={(val) => {
+                  const chosen = scriptPromptsQuery.data?.find((p) => String(p.id) === val);
+                  if (chosen) {
+                    setPersonaPrompt(chosen.promptText);
+                    setLibraryPickerKey((k) => k + 1);
+                  }
+                }}
+                disabled={isUploading || (scriptPromptsQuery.data?.length ?? 0) === 0}
+              >
+                <SelectTrigger className="text-sm h-8" data-testid="select-load-prompt">
+                  <SelectValue placeholder={
+                    (scriptPromptsQuery.data?.length ?? 0) === 0
+                      ? "No saved prompts — add in Settings"
+                      : "Load from prompt library…"
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {scriptPromptsQuery.data?.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)} title={p.promptText}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Textarea
               id="persona-prompt"
               data-testid="input-persona-prompt"

@@ -88,7 +88,8 @@ shared/
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` - Cloudflare R2
 - `ELEVENLABS_API_KEY` - ElevenLabs TTS
 - `SIGNED_URL_TTL_SECONDS` - Signed URL expiry (default 3600)
-- `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations
+- `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` - DeepSeek (OpenAI-compatible endpoint for chat/script generation)
+- `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations (also used for Whisper transcription fallback)
 
 ## Recent Changes
 - 2026-02-28: Speed up pipeline — removed local video download bottleneck; FFmpeg now streams video/music directly from R2 presigned URLs. Merged silenceremove + combine into ONE FFmpeg pass. Voice generation + presigned URL fetching run in parallel. Raw audio upload + FFmpeg run in parallel. hookHeadline/caption/SEO all generate in parallel. `burnCaptions` refactored to file-path based. `audioCleanKey` no longer uploaded (merged into final pass). Stuck job recovery on server restart. Jobs marked `processing` immediately on pickup. 2s breathing room between sequential queued jobs. Prompt library dropdown always visible (disabled placeholder when empty).

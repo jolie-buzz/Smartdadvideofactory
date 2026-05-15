@@ -7,19 +7,37 @@ import { join } from "path";
 import { tmpdir } from "os";
 import OpenAI from "openai";
 
-const llmClient = new OpenAI(
-  process.env.DEEPSEEK_API_KEY
-    ? {
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
-      }
-    : process.env.OPENAI_API_KEY
-      ? { apiKey: process.env.OPENAI_API_KEY }
-      : {
-          apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-          baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-        }
-);
+function createLlmClient(): OpenAI | null {
+  if (process.env.DEEPSEEK_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+    });
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+
+  if (process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+
+  return null;
+}
+
+const llmClient = createLlmClient();
+
+function getLlmClient(): OpenAI {
+  if (!llmClient) {
+    throw new Error("Missing LLM credentials. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, or AI_INTEGRATIONS_OPENAI_API_KEY.");
+  }
+
+  return llmClient;
+}
 
 const transcriptionClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -68,7 +86,7 @@ Rules:
     text: personaPrompt,
   });
 
-  const response = await llmClient.chat.completions.create({
+  const response = await getLlmClient().chat.completions.create({
     model,
     max_completion_tokens: 8192,
     messages: [
@@ -248,7 +266,7 @@ async function generateHookHeadline(hookPrompt: string | null, photoUrl: string 
     text: textMsg,
   });
 
-  const response = await llmClient.chat.completions.create({
+  const response = await getLlmClient().chat.completions.create({
     model,
     max_completion_tokens: 100,
     messages: [
@@ -271,7 +289,7 @@ async function generateCaption(captionPrompt: string | null, photoUrl: string | 
   if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
   userContent.push({ type: "text", text: textMsg });
 
-  const response = await llmClient.chat.completions.create({
+  const response = await getLlmClient().chat.completions.create({
     model,
     max_completion_tokens: 500,
     messages: [
@@ -294,7 +312,7 @@ async function generateSeoKeywords(seoPrompt: string | null, photoUrl: string | 
   if (photoUrl) userContent.push({ type: "image_url", image_url: { url: photoUrl } });
   userContent.push({ type: "text", text: textMsg });
 
-  const response = await llmClient.chat.completions.create({
+  const response = await getLlmClient().chat.completions.create({
     model,
     max_completion_tokens: 500,
     messages: [

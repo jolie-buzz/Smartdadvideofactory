@@ -28,26 +28,28 @@ client/src/
     setups-list.tsx       - List saved setups with activate/duplicate/edit/delete
     jobs-list.tsx         - Jobs dashboard with status, downloads, sharing
     video-builder.tsx     - Shot library uploader, variant generation, rendering
+    video-trimmer.tsx     - CapCut-style shot clip trimming UI
 
 server/
   index.ts               - Express server entry
   auth.ts                - Passport auth, session storage, login/register/logout routes
   routes.ts              - API routes (assets, jobs, shots, variants, admin)
-  storage.ts             - Database CRUD operations (users, assets, jobs, shots, variants)
+  storage.ts             - Database CRUD operations (users, assets, jobs, shots, variants, script prompts)
   db.ts                  - PostgreSQL connection
   r2.ts                  - Cloudflare R2 storage operations
   worker.ts              - Background job processing pipeline
   video-builder.ts       - FFmpeg variant rendering (concat shots)
 
 shared/
-  schema.ts              - Drizzle schema (users, assets, jobs, shots, variants tables)
+  schema.ts              - Drizzle schema (users, assets, jobs, shots, variants, script prompts)
 ```
 
 ### Database Tables
-- **users**: User accounts with username, hashed password, role (admin|user), status (approved|pending|restricted)
+- **users**: User accounts with username, hashed password, role (admin|user), status (approved|pending|restricted), and global excluded words
 - **assets**: Setups with photo/video keys, persona, voice, model settings, volume levels, feature toggles, videoSource (edited|builder), userId for ownership
-- **jobs**: Processing jobs linked to assets with status, outputs, sharing, userId for ownership
+- **jobs**: Processing jobs linked to assets with status, outputs, sharing, userId for ownership; audioCleanKey remains as a legacy nullable field
 - **shots**: Shot clips for Video Builder with category, shotType, duration, R2 key
+- **script_prompts**: Per-user saved prompt library entries for reuse in setup scripts
 - **variants**: Generated video variants with template, clip IDs, rendered R2 key
 
 ### Authentication & Authorization
@@ -58,6 +60,7 @@ shared/
 - Per-user data isolation: each user only sees their own setups and jobs
 - Admin dashboard: approve/restrict users, create accounts, edit usernames, reset passwords
 - Users can change their own password via the header key icon
+- Settings tab: excluded words and Script Prompt Library management
 
 ### Pipeline Flow
 1. **Setup**: Upload photo + video (or choose Video Builder) + optional music to R2 (presigned URLs), save persona prompt + voice/model settings + volume levels + feature toggles to DB
@@ -88,8 +91,9 @@ shared/
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` - Cloudflare R2
 - `ELEVENLABS_API_KEY` - ElevenLabs TTS
 - `SIGNED_URL_TTL_SECONDS` - Signed URL expiry (default 3600)
-- `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` - DeepSeek (OpenAI-compatible endpoint for chat/script generation)
-- `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations (also used for Whisper transcription fallback)
+- `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` - Optional DeepSeek OpenAI-compatible endpoint for chat/script generation; used first when present
+- `OPENAI_API_KEY` - Optional direct OpenAI key for chat/script generation and Whisper transcription; used when DeepSeek is not configured
+- `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI via Replit AI Integrations; fallback for chat/script generation and Whisper transcription
 
 ## Recent Changes
 - 2026-02-28: Speed up pipeline — removed local video download bottleneck; FFmpeg now streams video/music directly from R2 presigned URLs. Merged silenceremove + combine into ONE FFmpeg pass. Voice generation + presigned URL fetching run in parallel. Raw audio upload + FFmpeg run in parallel. hookHeadline/caption/SEO all generate in parallel. `burnCaptions` refactored to file-path based. `audioCleanKey` no longer uploaded (merged into final pass). Stuck job recovery on server restart. Jobs marked `processing` immediately on pickup. 2s breathing room between sequential queued jobs. Prompt library dropdown always visible (disabled placeholder when empty).

@@ -1,9 +1,16 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
 import { createServer } from "http";
-import { setupAuth } from "./auth";
+
+process.on("uncaughtException", (err) => {
+  console.error("[startup] Uncaught exception:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[startup] Unhandled rejection:", reason);
+  process.exit(1);
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -23,8 +30,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
-
-setupAuth(app);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -63,7 +68,11 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+async function main() {
+  const { setupAuth } = await import("./auth");
+  const { registerRoutes } = await import("./routes");
+
+  setupAuth(app);
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -83,6 +92,7 @@ app.use((req, res, next) => {
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
   if (process.env.NODE_ENV === "production") {
+    const { serveStatic } = await import("./static");
     serveStatic(app);
   } else {
     const { setupVite } = await import("./vite");
@@ -104,4 +114,9 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
-})();
+}
+
+main().catch((err) => {
+  console.error("[startup] Failed to start server:", err);
+  process.exit(1);
+});

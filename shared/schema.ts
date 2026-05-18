@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb, varchar, json, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -12,6 +12,14 @@ export const users = pgTable("users", {
   excludedWords: text("excluded_words"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
+
+export const sessions = pgTable("session", {
+  sid: varchar("sid").primaryKey().notNull(),
+  sess: json("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => [
+  index("IDX_session_expire").on(table.expire),
+]);
 
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),

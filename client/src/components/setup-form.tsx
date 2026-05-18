@@ -628,7 +628,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             <Input
               id="setup-name"
               data-testid="input-setup-name"
-              placeholder="e.g. SmartDad Promo v1"
+              placeholder="e.g. Buzzly Promo v1"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={isUploading}
@@ -1075,7 +1075,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
             <Textarea
               id="persona-prompt"
               data-testid="input-persona-prompt"
-              placeholder="Describe the product, target audience, and tone. Example: 'This is a rechargeable LED desk lamp perfect for students. Highlight the 3 brightness levels, USB-C charging, and 40-hour battery life. Tone: enthusiastic SmartDad reviewing tech products for families.'"
+              placeholder="Describe the product, target audience, and tone. Example: 'This is a rechargeable LED desk lamp perfect for students. Highlight the 3 brightness levels, USB-C charging, and 40-hour battery life. Tone: enthusiastic Buzzly reviewing tech products for families.'"
               value={personaPrompt}
               onChange={(e) => setPersonaPrompt(e.target.value)}
               rows={5}

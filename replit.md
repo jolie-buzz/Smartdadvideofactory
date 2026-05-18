@@ -1,4 +1,4 @@
-# SmartDad Video Factory
+# Buzzly
 
 ## Overview
 AI-powered video production pipeline for content creators. Users create "setups" (product photo + video + persona prompt + voice settings), then "activate" them to automatically generate scripts, voiceovers, and final videos through a background processing pipeline. Supports two video source modes: "Edited Video" (upload a pre-edited video) and "Video Builder" (auto-build videos from tagged shot clips using templates).

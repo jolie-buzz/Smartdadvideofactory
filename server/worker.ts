@@ -51,7 +51,7 @@ const transcriptionClient = process.env.OPENAI_API_KEY
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null): Promise<string> {
-  let systemMessage = `You are a SmartDad video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
+  let systemMessage = `You are a Buzzly video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
 
 IMPORTANT: The script MUST be short enough to be narrated in 45 seconds or less when read aloud at a natural pace. Aim for 80-100 words total.
 

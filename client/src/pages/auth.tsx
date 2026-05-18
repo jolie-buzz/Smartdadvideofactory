@@ -96,7 +96,7 @@ export default function AuthPage() {
             <div className="flex items-center justify-center w-10 h-10 rounded-md bg-primary text-primary-foreground">
               <Video className="w-5 h-5" />
             </div>
-            <CardTitle className="text-xl" data-testid="text-auth-title">SmartDad Video Factory</CardTitle>
+            <CardTitle className="text-xl" data-testid="text-auth-title">Buzzly</CardTitle>
           </div>
           <CardDescription data-testid="text-auth-description">
             {mode === "login" ? "Sign in to your account" : "Create a new account"}

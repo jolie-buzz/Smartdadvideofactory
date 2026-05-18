@@ -151,7 +151,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-semibold tracking-tight" data-testid="text-app-title">
-                SmartDad Video Factory
+                Buzzly
               </h1>
               <p className="text-sm text-muted-foreground">
                 AI-powered video production pipeline

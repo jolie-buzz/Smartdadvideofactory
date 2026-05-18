@@ -497,7 +497,7 @@ export async function registerRoutes(
   <div class="container">
     <video src="${previewUrl}" controls playsinline preload="metadata"></video>
     <a href="/s/${req.params.token}/download" class="download-btn">Download Video</a>
-    <p class="subtitle">SmartDad Video Factory</p>
+    <p class="subtitle">Buzzly</p>
   </div>
 </body>
 </html>`);

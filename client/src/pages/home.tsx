@@ -149,7 +149,7 @@ export default function Home() {
             <img
               src="/buzzly-logo.png"
               alt="Buzzly"
-              className="w-14 h-14 rounded-md object-contain bg-white"
+              className="w-14 h-14 object-contain"
             />
             <div>
               <h1 className="text-xl font-semibold tracking-tight" data-testid="text-app-title">

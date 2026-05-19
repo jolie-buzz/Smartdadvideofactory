@@ -96,7 +96,7 @@ export default function AuthPage() {
             <img
               src="/buzzly-logo.png"
               alt="Buzzly"
-              className="w-14 h-14 rounded-md object-contain bg-white"
+              className="w-14 h-14 object-contain"
             />
             <CardTitle className="text-xl" data-testid="text-auth-title">Buzzly</CardTitle>
           </div>

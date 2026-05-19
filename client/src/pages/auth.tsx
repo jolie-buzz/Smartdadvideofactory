@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Video, LogIn, UserPlus, CheckCircle, Clock } from "lucide-react";
+import { LogIn, UserPlus, CheckCircle, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -93,9 +93,11 @@ export default function AuthPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex items-center justify-center gap-3 mb-2">
-            <div className="flex items-center justify-center w-10 h-10 rounded-md bg-primary text-primary-foreground">
-              <Video className="w-5 h-5" />
-            </div>
+            <img
+              src="/buzzly-logo.png"
+              alt="Buzzly"
+              className="w-14 h-14 rounded-md object-contain bg-white"
+            />
             <CardTitle className="text-xl" data-testid="text-auth-title">Buzzly</CardTitle>
           </div>
           <CardDescription data-testid="text-auth-description">

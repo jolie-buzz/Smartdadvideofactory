@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Settings, Zap, Video, FolderOpen, LogOut, User, Shield, KeyRound, Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { Settings, Zap, FolderOpen, LogOut, User, Shield, KeyRound, Plus, Pencil, Trash2, X, Check } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -146,9 +146,11 @@ export default function Home() {
       <header className="border-b bg-card">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center justify-center w-10 h-10 rounded-md bg-primary text-primary-foreground">
-              <Video className="w-5 h-5" />
-            </div>
+            <img
+              src="/buzzly-logo.png"
+              alt="Buzzly"
+              className="w-14 h-14 rounded-md object-contain bg-white"
+            />
             <div>
               <h1 className="text-xl font-semibold tracking-tight" data-testid="text-app-title">
                 Buzzly

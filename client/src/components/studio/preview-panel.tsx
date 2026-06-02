@@ -308,12 +308,12 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
   useEffect(() => () => stopPreviewAudio(), []);
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)]">
-      <div className="relative grid min-h-0 flex-1 place-items-center bg-[#090d14] p-4">
-        <div className="absolute left-4 top-4 rounded-md border border-white/10 bg-black/35 px-2 py-1 text-xs text-slate-200">{formatLabel}</div>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:rounded-xl">
+      <div className="relative grid min-h-0 flex-1 place-items-center bg-[#090d14] p-4 max-md:p-2">
+        <div className="absolute left-4 top-4 rounded-md border border-white/10 bg-black/35 px-2 py-1 text-xs text-slate-200 max-md:left-2 max-md:top-2 max-md:text-[10px]">{formatLabel}</div>
         <div
           ref={stageRef}
-          className={`relative h-full w-auto max-w-full overflow-hidden border border-white/10 bg-[#05070a] shadow-2xl ${expandedPreview ? "max-h-[64vh]" : "max-h-[48vh]"}`}
+          className={`relative h-full w-auto max-w-full overflow-hidden border border-white/10 bg-[#05070a] shadow-2xl max-md:max-h-[42dvh] ${expandedPreview ? "max-h-[64vh]" : "max-h-[48vh]"}`}
           style={{ aspectRatio }}
         >
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.05),transparent_34%),radial-gradient(circle_at_50%_38%,rgba(255,196,0,0.1),transparent_34%),linear-gradient(180deg,#0b1018,#05070a)]" />

@@ -13,6 +13,7 @@ import {
   Music2,
   PanelLeftClose,
   Play,
+  Plus,
   Save,
   Settings,
   Shuffle,
@@ -127,13 +128,14 @@ const cloneTimeline = (goal?: StudioGoal | null): BuzzlyTimelineJson => {
 };
 
 type StudioRailId = "studio" | "setup" | "setups" | "jobs" | "settings" | "assets" | "text" | "audio" | "elements" | "ai";
+type MobileToolId = Extract<StudioRailId, "assets" | "text" | "audio" | "elements" | "ai"> | null;
 
 const productionRails = new Set<StudioRailId>(["setup", "setups", "jobs", "settings"]);
 
 const railItems: Array<{ id: StudioRailId; label: string; icon: LucideIcon }> = [
   { id: "studio", label: "Studio", icon: SquarePlay },
   { id: "setup", label: "Setup", icon: Settings },
-  { id: "setups", label: "Setups", icon: FolderOpen },
+  { id: "setups", label: "Activate", icon: FolderOpen },
   { id: "jobs", label: "Jobs", icon: Zap },
   { id: "settings", label: "Settings", icon: UserCircle },
   { id: "assets", label: "Assets", icon: FolderOpen },
@@ -289,6 +291,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [aiPrompt, setAiPrompt] = useState("");
   const [showJson, setShowJson] = useState(false);
   const [activeRail, setActiveRail] = useState<StudioRailId>(() => initialGoal ? "setup" : "studio");
+  const [mobileTool, setMobileTool] = useState<MobileToolId>(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [setupMode, setSetupMode] = useState<"guided" | "form">("form");
@@ -314,6 +317,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const selectedItem = useMemo(
     () => timeline.tracks.flatMap((track) => track.items).find((item) => item.id === selectedItemId) || null,
     [selectedItemId, timeline],
+  );
+  const mainVideoClipCount = useMemo(
+    () => timeline.tracks.find((track) => track.id === "video-main")?.items.filter((item) => item.type === "video").length || 0,
+    [timeline.tracks],
   );
   const permissions = useMemo(() => getActivePermissions(timeline), [timeline]);
   const activeMember = useMemo(
@@ -1775,9 +1782,9 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[#070a0f] text-slate-100">
-      <div className="flex h-screen flex-col">
-        <header className="grid min-h-16 grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-white/10 bg-[#090d14]/95 px-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+    <div className="h-screen overflow-hidden bg-[#070a0f] text-slate-100 max-md:h-[100dvh]">
+      <div className="flex h-screen flex-col max-md:h-[100dvh] max-md:pb-[calc(env(safe-area-inset-bottom)+72px)]">
+        <header className="hidden min-h-16 grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-white/10 bg-[#090d14]/95 px-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur md:grid">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div className="grid h-10 w-10 place-items-center rounded-full bg-[#ffc400] text-black shadow-[0_0_28px_rgba(255,196,0,0.35)]">
@@ -1853,8 +1860,8 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[52px_minmax(0,1fr)]">
-          <aside className="flex flex-col items-center justify-between border-r border-white/10 bg-[#080d14] px-1 py-2">
+        <div className="grid min-h-0 flex-1 grid-cols-[52px_minmax(0,1fr)] max-md:block">
+          <aside className="flex flex-col items-center justify-between border-r border-white/10 bg-[#080d14] px-1 py-2 max-md:hidden">
             <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto">
               {railItems.map((item) => {
                 const Icon = item.icon;
@@ -1880,11 +1887,11 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             <div />
           </aside>
 
-          <main className={`grid min-h-0 bg-[radial-gradient(circle_at_top_left,rgba(255,196,0,0.08),transparent_30%),#070a0f] ${
+          <main className={`grid min-h-0 bg-[radial-gradient(circle_at_top_left,rgba(255,196,0,0.08),transparent_30%),#070a0f] max-md:h-full ${
             isProductionRail ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_320px]"
           }`}>
             {isProductionRail ? (
-              <section className="min-h-0 overflow-y-auto p-4">
+              <section className="min-h-0 overflow-y-auto p-4 max-md:p-3">
                 <StudioWorkflowPanel
                   activeRail={activeRail}
                   editingAsset={editingAsset}
@@ -1917,7 +1924,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               </section>
             ) : (
               <>
-            <section className={`grid min-h-0 min-w-0 gap-4 overflow-hidden p-4 pb-0 max-[1180px]:[&_.assistant-pane]:hidden max-[920px]:grid-cols-1 ${
+            <section className={`grid min-h-0 min-w-0 gap-4 overflow-hidden p-4 pb-0 max-[1180px]:[&_.assistant-pane]:hidden max-[920px]:grid-cols-1 max-md:block max-md:overflow-y-auto max-md:p-0 ${
               showStudioSidePanels
                 ? leftPanelOpen
                   ? "grid-cols-[360px_minmax(520px,1fr)_360px] max-[1180px]:grid-cols-[320px_minmax(480px,1fr)]"
@@ -1950,8 +1957,8 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                 handleFilesUpload,
                 runAiTimelineCommand,
               })}
-              <div className="flex min-h-0 min-w-0 flex-col gap-4">
-                <div className="flex shrink-0 items-center justify-between rounded-lg border border-white/10 bg-[#101620]/90 px-4 py-3">
+              <div className="flex min-h-0 min-w-0 flex-col gap-4 max-md:h-full max-md:gap-0">
+                <div className="hidden shrink-0 items-center justify-between rounded-lg border border-white/10 bg-[#101620]/90 px-4 py-3 md:flex">
                   <div className="flex items-center gap-2">
                     <input
                       ref={videoLayerInputRef}
@@ -2072,7 +2079,40 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                     </Button>
                   </div>
                 </div>
-                <div className="min-h-0 min-w-0 flex-1">
+                <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-white/10 bg-[#090d14]/95 px-3 py-2 pt-[calc(env(safe-area-inset-top)+8px)] backdrop-blur md:hidden">
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-0 flex-1 border-white/10 bg-white/[0.04] px-2 text-xs text-white hover:bg-white/10"
+                    onClick={() => {
+                      if (!isPlaying) window.dispatchEvent(new Event("buzzly-prime-audio"));
+                      setIsPlaying((value) => !value);
+                    }}
+                  >
+                    <Play className="mr-1 h-4 w-4" />
+                    Preview
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-0 flex-1 border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
+                    onClick={shuffleSelectedShots}
+                  >
+                    <Shuffle className="mr-1 h-4 w-4" />
+                    Shuffle
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-0 flex-1 border-emerald-400/30 bg-emerald-400/10 px-2 text-xs text-emerald-200 hover:bg-emerald-400/20"
+                    onClick={setupBuilderMode ? finishSetupVideoBuilder : () => navigateRail("setup")}
+                    disabled={setupBuilderMode && setupBuilderFiles.length === 0}
+                  >
+                    <CheckCircle2 className="mr-1 h-4 w-4" />
+                    Done
+                  </Button>
+                  <Button className="h-11 min-w-0 flex-1 bg-[#ffc400] px-2 text-xs font-semibold text-black hover:bg-[#ffd84a]" onClick={handleExport}>
+                    Export
+                  </Button>
+                </div>
+                <div className="min-h-0 min-w-0 flex-1 max-md:h-[48dvh] max-md:flex-none max-md:px-3 max-md:py-3">
                   <PreviewPanel
                     timeline={timeline}
                     currentTime={currentTime}
@@ -2112,7 +2152,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               )}
             </section>
 
-            <section className="min-h-0 min-w-0 overflow-hidden p-4">
+            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[34dvh] max-md:p-0">
               <TimelinePanel
                 timeline={timeline}
                 currentTime={currentTime}
@@ -2134,6 +2174,154 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           </main>
         </div>
       </div>
+
+      {!isProductionRail && mainVideoClipCount === 0 && (
+        <Button
+          className="fixed bottom-[calc(env(safe-area-inset-bottom)+88px)] right-4 z-40 h-12 gap-2 rounded-full bg-[#ffc400] px-5 font-semibold text-black shadow-2xl hover:bg-[#ffd84a] md:hidden"
+          onClick={() => videoLayerInputRef.current?.click()}
+        >
+          <Plus className="h-5 w-5" />
+          Add clip
+        </Button>
+      )}
+
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#090d14]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-2 backdrop-blur md:hidden">
+        <div className="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {railItems.map((item) => {
+            const Icon = item.icon;
+            const opensSheet = item.id === "assets" || item.id === "text" || item.id === "audio" || item.id === "elements" || item.id === "ai";
+            const active = opensSheet ? activeRail === item.id || mobileTool === item.id : activeRail === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`flex min-h-[56px] min-w-[68px] flex-col items-center justify-center gap-1 rounded-xl px-2 text-[10px] font-medium ${
+                  active ? "bg-[#ffc400]/15 text-[#ffc400]" : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                }`}
+                onClick={() => {
+                  if (opensSheet) {
+                    setActiveRail(item.id);
+                    setMobileTool((current) => current === item.id ? null : item.id);
+                    return;
+                  }
+                  if (item.id === "studio") {
+                    setMobileTool(null);
+                    navigateRail("studio");
+                    return;
+                  }
+                  setMobileTool(null);
+                  navigateRail(item.id);
+                }}
+              >
+                <Icon className="h-5 w-5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {mobileTool && (
+        <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+70px)] z-50 max-h-[46dvh] overflow-hidden rounded-t-2xl border border-white/10 bg-[#101620] text-white shadow-[0_-24px_70px_rgba(0,0,0,0.55)] md:hidden">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#ffc400]">Tools</p>
+              <h3 className="text-base font-semibold">
+                {mobileTool === "assets" ? "Assets" : mobileTool === "text" ? "Text" : mobileTool === "audio" ? "Audio" : mobileTool === "elements" ? "Elements" : "AI Tools"}
+              </h3>
+            </div>
+            <Button variant="ghost" className="h-10 px-3 text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => setMobileTool(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="max-h-[calc(46dvh-66px)] overflow-y-auto p-4">
+            {mobileTool === "assets" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={() => videoLayerInputRef.current?.click()}>
+                  <Video className="h-4 w-4" />
+                  Add video
+                </Button>
+                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => imageLayerInputRef.current?.click()}>
+                  <Image className="h-4 w-4" />
+                  Add photo
+                </Button>
+                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => handleTimelineToolAction("split")}>
+                  Split
+                </Button>
+                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => handleTimelineToolAction("duplicate")}>
+                  Duplicate
+                </Button>
+              </div>
+            )}
+            {mobileTool === "text" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={() => addLayerToTimeline("text")}>
+                  <Type className="h-4 w-4" />
+                  Add text
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => runAiTimelineCommand("Make captions more premium")}>
+                  Premium captions
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => runAiTimelineCommand("Lagyan mo ng stronger CTA")}>
+                  Strong CTA
+                </Button>
+              </div>
+            )}
+            {mobileTool === "audio" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={() => musicLayerInputRef.current?.click()}>
+                  <Music2 className="h-4 w-4" />
+                  Add audio
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => runAiTimelineCommand("Palitan music")}>
+                  Change music
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => selectAsset("music-bed")}>
+                  Select music
+                </Button>
+              </div>
+            )}
+            {mobileTool === "elements" && (
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ["Zoom in", "zoom-in-motion"],
+                  ["Zoom out", "zoom-out-motion"],
+                  ["Punch", "effect-punch"],
+                  ["Vivid", "effect-vivid"],
+                  ["Cinema", "effect-cinematic"],
+                  ["Reset", "reset"],
+                ].map(([label, action]) => (
+                  <Button
+                    key={action}
+                    variant="outline"
+                    className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10"
+                    onClick={() => handleTimelineToolAction(action as TimelineToolAction)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {mobileTool === "ai" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={routeGenerationEngines}>
+                  <Sparkles className="h-4 w-4" />
+                  Route AI
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={runSuggestedPipeline}>
+                  Run pipeline
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={generateSmartScenes}>
+                  Smart scenes
+                </Button>
+                <Button variant="outline" className="h-12 justify-start border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={analyzePerformance}>
+                  Analyze edit
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showJson && (
         <Card className="fixed inset-x-8 bottom-8 z-50 border-white/10 bg-[#111722] text-white shadow-2xl">

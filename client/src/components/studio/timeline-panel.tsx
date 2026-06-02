@@ -98,7 +98,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const [aiProgress, setAiProgress] = useState(0);
   const [aiStatus, setAiStatus] = useState("");
   const [aiError, setAiError] = useState("");
-  const timelineWidth = Math.max(920, timeline.project.duration * 46);
+  const timelineWidth = Math.max(1080, timeline.project.duration * 58);
   const playheadLeft = 148 + clampNumber((currentTime / timeline.project.duration) * timelineWidth, 0, timelineWidth);
   const markerStep = timeline.project.duration > 60 ? 10 : 5;
   const markers = Array.from(
@@ -112,8 +112,8 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const pickerTop = transitionPair && typeof window !== "undefined" ? Math.min(Math.max(12, transitionPair.y + 12), window.innerHeight - 460) : 80;
 
   return (
-    <section className="relative flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)]">
-      <div className="flex items-center justify-between border-b border-white/10 bg-[#0d131c] px-4 py-3">
+    <section className="relative flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:rounded-none max-md:border-x-0 max-md:border-b-0">
+      <div className="flex items-center justify-between border-b border-white/10 bg-[#0d131c] px-4 py-3 max-md:hidden">
         <div className="flex flex-wrap items-center gap-1">
           {[
             { label: "Split", icon: Scissors, action: "split" as const },
@@ -261,10 +261,10 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
       >
         <div className="min-h-full" style={{ width: 148 + timelineWidth }}>
           <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `148px ${timelineWidth}px` }}>
-            <div className="sticky left-0 z-30 border-r border-white/10 bg-[#0a0f17] px-4 py-2 text-xs text-slate-500">0s</div>
+            <div className="sticky left-0 z-30 border-r border-white/10 bg-[#0a0f17] px-4 py-2 text-xs text-slate-500 max-md:w-[112px] max-md:px-3">0s</div>
             <button
               type="button"
-              className="relative h-9 cursor-crosshair overflow-hidden text-left"
+              className="relative h-9 cursor-crosshair overflow-hidden text-left max-md:h-11"
               onClick={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
                 onSeek(((event.clientX - rect.left) / rect.width) * timeline.project.duration);
@@ -291,17 +291,17 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
               const TrackIcon = iconByType[track.type];
               return (
             <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `148px ${timelineWidth}px` }}>
-              <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3">
+              <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3 max-md:w-[112px] max-md:gap-2 max-md:px-3">
                 <TrackIcon className="h-4 w-4 text-slate-300" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-white">{track.name.replace(" Track", "")}</p>
+                  <p className="truncate text-sm font-medium text-white max-md:text-xs">{track.name.replace(" Track", "")}</p>
                 </div>
-                <Eye className="h-3.5 w-3.5 text-slate-500" />
-                <Lock className="h-3.5 w-3.5 text-slate-500" />
+                <Eye className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
+                <Lock className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
               </div>
               <div
                 data-track-lane={track.id}
-                className="relative min-h-[56px] overflow-hidden bg-[linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[length:8.33%_100%] px-2 py-2"
+                className="relative min-h-[56px] overflow-hidden bg-[linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[length:8.33%_100%] px-2 py-2 max-md:min-h-[76px] max-md:py-3"
                 onClick={(event) => {
                   if (event.target !== event.currentTarget) return;
                   const rect = event.currentTarget.getBoundingClientRect();
@@ -331,7 +331,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                         {(isTouching || gap >= 0) && (
                           <button
                             type="button"
-                            className={`absolute top-1/2 z-20 grid h-6 w-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-[10px] shadow-lg transition ${
+                            className={`absolute top-1/2 z-20 grid h-6 w-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-[10px] shadow-lg transition max-md:h-11 max-md:w-11 ${
                               item.transitionOut && item.transitionOut !== "none"
                                 ? "border-[#ffc400] bg-[#ffc400] text-black"
                                 : "border-white/20 bg-[#0d131c] text-[#ffc400] hover:border-[#ffc400] hover:bg-[#ffc400] hover:text-black"
@@ -477,7 +477,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                         onSeek(item.startTime + clickedOffset);
                         onUpdateItem(item.id, {});
                       }}
-                      className={`absolute top-2 h-10 overflow-hidden rounded-md border bg-gradient-to-r px-3 text-left text-xs text-white shadow-lg transition ${colorByType[item.type]} ${
+                      className={`absolute top-2 h-10 min-w-[44px] overflow-hidden rounded-md border bg-gradient-to-r px-3 text-left text-xs text-white shadow-lg transition max-md:h-14 max-md:rounded-lg max-md:px-4 max-md:text-sm ${colorByType[item.type]} ${
                         selected ? "ring-2 ring-[#ffc400]" : "opacity-90 hover:opacity-100"
                       } cursor-grab active:cursor-grabbing`}
                       style={{ left, width }}
@@ -493,12 +493,12 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                       {selected && (
                         <>
                           <span
-                            className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400]"
+                            className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
                             title="Drag to extend or trim start"
                             onPointerDown={(event) => startTrimDrag("start", event)}
                           />
                           <span
-                            className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400]"
+                            className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
                             title="Drag to extend or trim end"
                             onPointerDown={(event) => startTrimDrag("end", event)}
                           />

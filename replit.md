@@ -1,18 +1,24 @@
 # Buzzly
 
 ## Overview
-AI-powered video production pipeline for content creators. Users create "setups" (product photo + video + persona prompt + voice settings), then "activate" them to automatically generate scripts, voiceovers, and final videos through a background processing pipeline. Supports two video source modes: "Edited Video" (upload a pre-edited video) and "Video Builder" (auto-build videos from tagged shot clips using templates).
+Buzzly Studio is a CapCut-inspired short-form video ad editor with AI planning, AI script generation, voiceover, captions, and timeline-based editing. The product direction is to build our own editor UI, timeline data model, AI workflow, and rendering pipeline without building a full video codec from scratch.
+
+The first Studio structure is now a functional mock editor surface: Studio page, Asset panel, Timeline panel, Preview panel, AI chat panel, Export button, and Buzzly Timeline JSON. Advanced rendering is intentionally not implemented yet.
 
 ## Architecture
 
-### Tech Stack
-- **Frontend**: React + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: Node.js + Express
-- **Database**: PostgreSQL (via Drizzle ORM)
-- **Storage**: Cloudflare R2 (S3-compatible, private bucket)
-- **AI**: OpenAI (via Replit AI Integrations) for script generation
-- **TTS**: ElevenLabs API for voice generation
-- **Media**: FFmpeg for dead-air removal, video/audio combining, and shot concatenation
+### Target Tech Stack
+- **App Framework**: Next.js
+- **UI**: React + TypeScript + Tailwind CSS
+- **Database**: PostgreSQL
+- **ORM**: Prisma
+- **Preview/Render**: Remotion first
+- **Media Helper**: FFmpeg only when needed
+- **AI**: OpenAI for planning, scripts, captions, SEO
+- **TTS**: ElevenLabs for voiceover
+
+### Current Implementation Note
+This repository is currently still React/Vite + Express + Drizzle. Buzzly Studio is being scaffolded inside the existing app first so the product structure can be validated quickly. Future work can migrate the Studio surface into Next.js + Prisma while preserving the shared Buzzly Timeline JSON model.
 
 ### Project Structure
 ```
@@ -24,6 +30,12 @@ client/src/
   hooks/
     use-auth.ts           - Auth state hook (login, register, logout, current user)
   components/
+    studio/
+      buzzly-studio.tsx     - First Buzzly Studio shell
+      asset-panel.tsx       - Mock asset library panel
+      timeline-panel.tsx    - Track-based timeline panel
+      preview-panel.tsx     - 9:16 preview surface placeholder
+      ai-chat-panel.tsx     - AI command/planner chat panel
     setup-form.tsx        - Create/edit setup form with Video Source selector, file replace
     setups-list.tsx       - List saved setups with activate/duplicate/edit/delete
     jobs-list.tsx         - Jobs dashboard with status, downloads, sharing
@@ -42,7 +54,26 @@ server/
 
 shared/
   schema.ts              - Drizzle schema (users, assets, jobs, shots, variants, script prompts)
+  models/timeline.ts     - Buzzly Timeline JSON model and mock Studio timeline
 ```
+
+### Buzzly Timeline JSON
+The canonical editor model is `buzzly.timeline.v1`. It supports:
+- video clips
+- image clips
+- audio clips
+- text overlays
+- captions
+- start time
+- duration
+- trim start
+- trim end
+- volume
+- position
+- scale
+- opacity
+
+This model is designed to become the bridge between the editor UI, OpenAI planning/script/caption workflows, ElevenLabs voiceover, Remotion rendering, and FFmpeg helper operations.
 
 ### Database Tables
 - **users**: User accounts with username, hashed password, role (admin|user), status (approved|pending|restricted), and global excluded words

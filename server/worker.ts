@@ -342,9 +342,9 @@ async function processJob(jobId: number): Promise<void> {
 
   try {
     // ── Video Builder: auto-generate variant if needed ──────────────────────
-    if (asset.videoSource === "builder" && (!asset.videoKey || asset.videoKey === "")) {
+    if (asset.videoSource === "builder") {
       await storage.updateJob(jobId, { status: "building_video" });
-      await storage.appendJobLog(jobId, "Video Builder mode: auto-generating variant from shot library...");
+      await storage.appendJobLog(jobId, "Video Builder mode: creating one fresh shuffled cut from selected shots...");
 
       const allShots = await storage.getShots(asset.id);
       if (allShots.length === 0) {
@@ -352,11 +352,40 @@ async function processJob(jobId: number): Promise<void> {
       }
 
       const recentClipIds = await storage.getRecentVariantClipIds(asset.id, 10);
-      const shotsByCategory: Record<string, typeof allShots> = {};
-      for (const s of allShots) {
-        if (!shotsByCategory[s.category]) shotsByCategory[s.category] = [];
-        shotsByCategory[s.category].push(s);
-      }
+      const builderSlots = allShots
+        .map((shot) => {
+          const match = /^(FIXED|SHUFFLE)_(\d+)$/.exec(shot.category || "");
+          return match ? { shot, mode: match[1], index: Number(match[2]) } : null;
+        })
+        .filter(Boolean) as Array<{ shot: typeof allShots[number]; mode: string; index: number }>;
+
+      let clipIds: number[] = [];
+      if (builderSlots.length > 0) {
+        const sortedSlots = [...builderSlots].sort((a, b) => a.index - b.index);
+        const shufflePool = sortedSlots.filter((slot) => slot.mode === "SHUFFLE").map((slot) => slot.shot);
+        const unusedShuffle = [...shufflePool];
+
+        const pickShuffle = () => {
+          const preferred = unusedShuffle.filter((shot) => !recentClipIds.includes(shot.id));
+          const pool = preferred.length > 0 ? preferred : unusedShuffle;
+          if (pool.length === 0) return null;
+          const chosen = pool[Math.floor(Math.random() * pool.length)];
+          const chosenIndex = unusedShuffle.findIndex((shot) => shot.id === chosen.id);
+          if (chosenIndex >= 0) unusedShuffle.splice(chosenIndex, 1);
+          return chosen.id;
+        };
+
+        clipIds = sortedSlots
+          .map((slot) => slot.mode === "SHUFFLE" ? pickShuffle() : slot.shot.id)
+          .filter((id): id is number => typeof id === "number");
+
+        await storage.appendJobLog(jobId, `Shuffle clips: ${shufflePool.length} selected, ${sortedSlots.length - shufflePool.length} fixed.`);
+      } else {
+        const shotsByCategory: Record<string, typeof allShots> = {};
+        for (const s of allShots) {
+          if (!shotsByCategory[s.category]) shotsByCategory[s.category] = [];
+          shotsByCategory[s.category].push(s);
+        }
 
       const hookShots = shotsByCategory["HOOK"] || [];
       const problemShots = shotsByCategory["PROBLEM"] || [];
@@ -365,13 +394,12 @@ async function processJob(jobId: number): Promise<void> {
       const bodyShots = shotsByCategory["BODY"] || [];
       const ctaShots = shotsByCategory["CTA"] || [];
 
-      if (hookShots.length === 0) throw new Error("At least 1 HOOK shot is required");
-      if (bodyShots.length < 4) throw new Error("At least 4 BODY shots with distinct shotTypes are required");
+      const fallbackShots = allShots;
+      const effectiveHookShots = hookShots.length > 0 ? hookShots : fallbackShots;
+      const effectiveBodyShots = bodyShots.length > 0 ? bodyShots : fallbackShots;
 
-      const templateDuration = 45;
-      const bodyCount = 6;
+      const bodyCount = Math.min(6, Math.max(1, effectiveBodyShots.length - 1));
       const usedIds = new Set<number>();
-      const clipIds: number[] = [];
 
       const pick = (pool: typeof allShots, fallback?: typeof allShots): number | null => {
         const preferred = pool.filter(s => !usedIds.has(s.id) && !recentClipIds.includes(s.id));
@@ -387,19 +415,19 @@ async function processJob(jobId: number): Promise<void> {
         return c.id;
       };
 
-      const hookId = pick(hookShots); if (hookId) clipIds.push(hookId);
-      const problemId = pick(problemShots, hookShots); if (problemId) clipIds.push(problemId);
-      const solutionId = pick(solutionShots, highlightShots); if (solutionId) clipIds.push(solutionId);
-      const highlightId = pick(highlightShots, bodyShots); if (highlightId) clipIds.push(highlightId);
+      const hookId = pick(effectiveHookShots); if (hookId) clipIds.push(hookId);
+      const problemId = pick(problemShots, effectiveBodyShots); if (problemId) clipIds.push(problemId);
+      const solutionId = pick(solutionShots, highlightShots.length ? highlightShots : effectiveBodyShots); if (solutionId) clipIds.push(solutionId);
+      const highlightId = pick(highlightShots, effectiveBodyShots); if (highlightId) clipIds.push(highlightId);
 
       const usedBodyTypes = new Set<string>();
       for (let b = 0; b < bodyCount; b++) {
         let pool: typeof allShots;
         if (usedBodyTypes.size < 4) {
-          pool = bodyShots.filter(s => !usedIds.has(s.id) && s.shotType && !usedBodyTypes.has(s.shotType));
-          if (pool.length === 0) pool = bodyShots.filter(s => !usedIds.has(s.id));
+          pool = effectiveBodyShots.filter(s => !usedIds.has(s.id) && s.shotType && !usedBodyTypes.has(s.shotType));
+          if (pool.length === 0) pool = effectiveBodyShots.filter(s => !usedIds.has(s.id));
         } else {
-          pool = bodyShots.filter(s => !usedIds.has(s.id));
+          pool = effectiveBodyShots.filter(s => !usedIds.has(s.id));
         }
         const preferred = pool.filter(s => !recentClipIds.includes(s.id));
         const candidates = preferred.length > 0 ? preferred : pool;
@@ -411,9 +439,12 @@ async function processJob(jobId: number): Promise<void> {
       }
 
       if (ctaShots.length > 0) {
-        const ctaId = pick(ctaShots, bodyShots);
+        const ctaId = pick(ctaShots, effectiveBodyShots);
         if (ctaId) clipIds.push(ctaId);
       }
+      }
+
+      const templateDuration = 45;
 
       const variant = await storage.createVariant({
         assetId: asset.id,

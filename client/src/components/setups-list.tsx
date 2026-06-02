@@ -161,7 +161,7 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
                   ) : (
                     <Zap className="w-4 h-4 mr-1" />
                   )}
-                  Activate
+                  {asset.videoSource === "builder" ? "Activate shuffle" : "Activate"}
                 </Button>
                 <Button
                   size="icon"

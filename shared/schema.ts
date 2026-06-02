@@ -146,3 +146,4 @@ export type ScriptPrompt = typeof scriptPrompts.$inferSelect;
 export type InsertScriptPrompt = z.infer<typeof insertScriptPromptSchema>;
 
 export * from "./models/chat";
+export * from "./models/timeline";

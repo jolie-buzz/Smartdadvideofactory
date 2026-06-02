@@ -11,6 +11,9 @@ import { z } from "zod";
 import os from "os";
 import path from "path";
 import fs from "fs";
+import OpenAI from "openai";
+import { spawn } from "child_process";
+import ffmpegStatic from "ffmpeg-static";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -24,6 +27,188 @@ const upload = multer({
     fileSize: 200 * 1024 * 1024,
   },
 });
+
+function runRouteFfmpeg(args: string[], timeoutMs = 300_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegStatic || "ffmpeg", args);
+    let stderr = "";
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill("SIGKILL");
+      reject(new Error(`FFmpeg timed out after ${timeoutMs / 1000}s. Last output: ${stderr.slice(-500)}`));
+    }, timeoutMs);
+
+    proc.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+      if (code === 0) resolve();
+      else reject(new Error(`FFmpeg failed with code ${code}: ${stderr.slice(-800)}`));
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      if (!killed) reject(err);
+    });
+  });
+}
+
+async function isolateVoiceCloneSample(file: Express.Multer.File): Promise<{ path: string; filename: string; mimeType: string }> {
+  const outputPath = path.join(
+    os.tmpdir(),
+    `voice_clone_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`,
+  );
+  const audioFilter = [
+    "highpass=f=80",
+    "lowpass=f=12000",
+    "afftdn=nf=-25",
+    "dynaudnorm=f=150:g=15",
+    "silenceremove=start_periods=1:start_duration=0.15:start_threshold=-45dB:stop_periods=-1:stop_duration=0.5:stop_threshold=-45dB",
+  ].join(",");
+
+  await runRouteFfmpeg([
+    "-y",
+    "-i", file.path,
+    "-vn",
+    "-map", "0:a:0",
+    "-ac", "1",
+    "-ar", "44100",
+    "-af", audioFilter,
+    "-codec:a", "libmp3lame",
+    "-b:a", "128k",
+    outputPath,
+  ]);
+
+  return {
+    path: outputPath,
+    filename: `${path.parse(file.originalname).name || "voice-sample"}-isolated.mp3`,
+    mimeType: "audio/mpeg",
+  };
+}
+
+function createEditorLlmClient(): OpenAI | null {
+  if (process.env.DEEPSEEK_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+    });
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+
+  if (process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+
+  return null;
+}
+
+function getGeminiVideoApiKey() {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "";
+}
+
+function findGeminiVideoUri(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, any>;
+  if (typeof record.uri === "string" && /^https?:\/\//.test(record.uri)) return record.uri;
+  if (typeof record.downloadUri === "string") return record.downloadUri;
+  if (typeof record.videoUri === "string") return record.videoUri;
+  for (const child of Object.values(record)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        const found = findGeminiVideoUri(item);
+        if (found) return found;
+      }
+    } else {
+      const found = findGeminiVideoUri(child);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function generateGeminiTransitionVideo(prompt: string, seconds: number): Promise<Buffer> {
+  const apiKey = getGeminiVideoApiKey();
+  if (!apiKey) {
+    throw new Error("Missing GEMINI_API_KEY. Add it to your environment to enable AI video transitions.");
+  }
+
+  const model = process.env.GEMINI_VIDEO_MODEL || "veo-3.1-generate-preview";
+  const baseUrl = process.env.GEMINI_API_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
+  const durationSeconds = [4, 6, 8].includes(seconds) ? seconds : 4;
+  const startRes = await fetch(`${baseUrl}/models/${model}:predictLongRunning`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      instances: [{ prompt }],
+      parameters: {
+        aspectRatio: "9:16",
+        resolution: "720p",
+        durationSeconds: String(durationSeconds),
+        personGeneration: "allow_all",
+      },
+    }),
+  });
+
+  if (!startRes.ok) {
+    const errorText = await startRes.text();
+    console.error("[gemini-video] start request failed", {
+      status: startRes.status,
+      model,
+      message: errorText.slice(0, 500),
+    });
+    throw new Error(`Gemini video request failed (${startRes.status}): ${errorText.slice(0, 500)}`);
+  }
+
+  const startJson = await startRes.json() as { name?: string };
+  if (!startJson.name) throw new Error("Gemini video request did not return an operation name.");
+
+  let operation: any = startJson;
+  for (let attempt = 0; attempt < 72; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const statusRes = await fetch(`${baseUrl}/${startJson.name}`, {
+      headers: { "x-goog-api-key": apiKey },
+    });
+    if (!statusRes.ok) {
+      const errorText = await statusRes.text();
+      console.error("[gemini-video] status request failed", {
+        status: statusRes.status,
+        model,
+        message: errorText.slice(0, 500),
+      });
+      throw new Error(`Gemini video status failed (${statusRes.status}): ${errorText.slice(0, 500)}`);
+    }
+    operation = await statusRes.json();
+    if (operation.done) break;
+  }
+
+  if (!operation.done) throw new Error("Gemini video generation timed out.");
+  if (operation.error) throw new Error(`Gemini video generation failed: ${JSON.stringify(operation.error)}`);
+
+  const videoUri = findGeminiVideoUri(operation.response);
+  if (!videoUri) throw new Error("Gemini video generation completed but no video URI was returned.");
+
+  const videoRes = await fetch(videoUri, {
+    headers: { "x-goog-api-key": apiKey },
+  });
+  if (!videoRes.ok) {
+    const errorText = await videoRes.text();
+    throw new Error(`Gemini video download failed (${videoRes.status}): ${errorText.slice(0, 500)}`);
+  }
+
+  return Buffer.from(await videoRes.arrayBuffer());
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -107,7 +292,7 @@ export async function registerRoutes(
         voiceId: voiceId || null,
         voiceName: voiceName || null,
         openaiModel: openaiModel || "gpt-4o",
-        elevenlabsModel: elevenlabsModel || "eleven_multilingual_v2",
+        elevenlabsModel: elevenlabsModel || "eleven_turbo_v2_5",
         useEnhance: useEnhance !== undefined ? useEnhance : true,
         thresholdDb: typeof thresholdDb === "number" ? thresholdDb : parseFloat(thresholdDb) || -35,
         removeSilencesLongerThan: typeof removeSilencesLongerThan === "number" ? removeSilencesLongerThan : parseFloat(removeSilencesLongerThan) || 0.2,
@@ -272,11 +457,12 @@ export async function registerRoutes(
         const err = await response.text();
         return res.status(response.status).json({ error: `ElevenLabs API error: ${err}` });
       }
-      const data = await response.json() as { voices: Array<{ voice_id: string; name: string; category: string }> };
+      const data = await response.json() as { voices: Array<{ voice_id: string; name: string; category: string; preview_url?: string }> };
       const voices = data.voices.map((v) => ({
         voice_id: v.voice_id,
         name: v.name,
         category: v.category,
+        preview_url: v.preview_url,
       }));
       res.json(voices);
     } catch (err: any) {
@@ -308,6 +494,189 @@ export async function registerRoutes(
       res.json(ttsModels);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/elevenlabs/voices/clone", requireAuth, upload.array("files", 5), async (req, res) => {
+    const uploadedFiles = Array.isArray(req.files) ? req.files as Express.Multer.File[] : [];
+    const isolatedFiles: Array<{ path: string; filename: string; mimeType: string }> = [];
+    try {
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: "ELEVENLABS_API_KEY not configured" });
+      }
+
+      const name = String(req.body.name || "").trim();
+      const description = String(req.body.description || "").trim();
+      if (!name) {
+        return res.status(400).json({ error: "Voice name is required" });
+      }
+      if (!uploadedFiles.length) {
+        return res.status(400).json({ error: "At least one voice sample is required" });
+      }
+
+      const formData = new FormData();
+      formData.append("name", name);
+      if (description) formData.append("description", description);
+
+      for (const file of uploadedFiles) {
+        const isolatedFile = await isolateVoiceCloneSample(file);
+        isolatedFiles.push(isolatedFile);
+        const audio = await fs.promises.readFile(isolatedFile.path);
+        formData.append("files", new Blob([audio], { type: isolatedFile.mimeType }), isolatedFile.filename);
+      }
+
+      const response = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+        method: "POST",
+        headers: { "xi-api-key": apiKey },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        return res.status(response.status).json({ error: `ElevenLabs API error: ${err}` });
+      }
+
+      const data = await response.json();
+      res.status(201).json(data);
+    } catch (err: any) {
+      console.error("ElevenLabs clone voice error:", err);
+      res.status(500).json({ error: err.message || "Failed to clone voice" });
+    } finally {
+      for (const file of uploadedFiles) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+      for (const file of isolatedFiles) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+    }
+  });
+
+  app.post("/api/editor/generate-script", requireAuth, async (req, res) => {
+    try {
+      const brief = String(req.body.brief || "").trim();
+      const durationSec = Number(req.body.durationSec || 30);
+      const model = String(req.body.model || "gpt-4.1-mini");
+
+      if (!brief) {
+        return res.status(400).json({ error: "brief is required" });
+      }
+
+      const client = createEditorLlmClient();
+      if (!client) {
+        return res.status(400).json({ error: "OpenAI or DeepSeek API key is not configured" });
+      }
+
+      const response = await client.chat.completions.create({
+        model,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `You are Buzzly, an AI Content Engine for TikTok and Reels. Create short-form video scripts in a Taglish creator tone. Return valid JSON only with keys: script, captions, hashtags. captions must be an array of 5 to 8 short subtitle lines. hashtags must be a copy-paste-ready string.`,
+          },
+          {
+            role: "user",
+            content: `Create a ${durationSec}-second TikTok/Reels script for this brief:\n${brief}\n\nKeep the script punchy, practical, and easy to narrate. Do not include markdown.`,
+          },
+        ],
+        temperature: 0.8,
+      });
+
+      const raw = response.choices[0]?.message?.content || "{}";
+      let parsed: { script?: string; captions?: string[]; hashtags?: string } = {};
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = { script: raw, captions: raw.split(/\n+/).filter(Boolean).slice(0, 8), hashtags: "" };
+      }
+
+      res.json({
+        script: parsed.script || "",
+        captions: Array.isArray(parsed.captions) ? parsed.captions : [],
+        hashtags: parsed.hashtags || "",
+      });
+    } catch (err: any) {
+      console.error("Editor script generation error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate script" });
+    }
+  });
+
+  app.post("/api/editor/generate-voiceover", requireAuth, async (req, res) => {
+    try {
+      const text = String(req.body.text || "").trim();
+      const voiceId = String(req.body.voiceId || "").trim();
+      const modelId = String(req.body.modelId || "eleven_turbo_v2_5");
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "ELEVENLABS_API_KEY not configured" });
+      }
+      if (!text || !voiceId) {
+        return res.status(400).json({ error: "text and voiceId are required" });
+      }
+      if (text.length > 5000) {
+        return res.status(400).json({ error: "Voiceover text is too long. Keep it under 5000 characters." });
+      }
+
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: modelId,
+          voice_settings: {
+            stability: 0.45,
+            similarity_boost: 0.8,
+            style: 0.2,
+            use_speaker_boost: true,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        return res.status(response.status).json({ error: `ElevenLabs API error: ${err}` });
+      }
+
+      const audio = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Length", String(audio.length));
+      res.send(audio);
+    } catch (err: any) {
+      console.error("Editor voiceover error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate voiceover" });
+    }
+  });
+
+  app.post("/api/gemini/video-transition", requireAuth, async (req, res) => {
+    try {
+      const schema = z.object({
+        prompt: z.string().min(3).max(1000),
+        seconds: z.number().int().refine((value) => [4, 6, 8].includes(value), "seconds must be 4, 6, or 8"),
+      });
+      const { prompt, seconds } = schema.parse(req.body);
+      const videoBuffer = await generateGeminiTransitionVideo(prompt, seconds);
+      const key = `generated-transitions/${req.user!.id}/${uuidv4().slice(0, 8)}.mp4`;
+      await uploadToR2(key, videoBuffer, "video/mp4");
+      const url = await getSignedDownloadUrl(key);
+      res.json({
+        key,
+        url,
+        durationSec: seconds,
+        filename: path.basename(key),
+        model: process.env.GEMINI_VIDEO_MODEL || "veo-3.1-generate-preview",
+      });
+    } catch (err: any) {
+      console.error("Gemini transition error:", err);
+      if (err?.issues) {
+        return res.status(400).json({ error: err.issues[0]?.message || "Invalid transition request" });
+      }
+      res.status(500).json({ error: err.message || "Failed to generate Gemini transition" });
     }
   });
 

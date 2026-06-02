@@ -1,0 +1,38 @@
+[
+  {
+    "id": "free-music-paper-taxi",
+    "title": "Paper Taxi",
+    "filename": "paper-taxi.mp3",
+    "uri": "/free-music/paper-taxi.mp3",
+    "mood": "Bright, friendly, social ad",
+    "sourceName": "Free Safe Music",
+    "sourceUrl": "https://freesafemusic.com/"
+  },
+  {
+    "id": "free-music-neon-mango-fever",
+    "title": "Neon Mango Fever",
+    "filename": "neon-mango-fever.mp3",
+    "uri": "/free-music/neon-mango-fever.mp3",
+    "mood": "Energetic, colorful, fast UGC",
+    "sourceName": "Free Safe Music",
+    "sourceUrl": "https://freesafemusic.com/"
+  },
+  {
+    "id": "free-music-turbo-backspin-love",
+    "title": "Turbo Backspin Love",
+    "filename": "turbo-backspin-love.mp3",
+    "uri": "/free-music/turbo-backspin-love.mp3",
+    "mood": "Punchy, promo, scroll-stopper",
+    "sourceName": "Free Safe Music",
+    "sourceUrl": "https://freesafemusic.com/"
+  },
+  {
+    "id": "free-music-stapler-hum",
+    "title": "Stapler Hum",
+    "filename": "stapler-hum.mp3",
+    "uri": "/free-music/stapler-hum.mp3",
+    "mood": "Quirky, light, product demo",
+    "sourceName": "Free Safe Music",
+    "sourceUrl": "https://freesafemusic.com/"
+  }
+]

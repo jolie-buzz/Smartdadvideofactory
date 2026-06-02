@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors } from "lucide-react";
 import VideoTrimmer from "./video-trimmer";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -118,15 +119,59 @@ async function uploadFileWithProgress(
   });
 }
 
+const studioClipKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
+
+async function uploadStudioShot(file: File, assetId: number, index: number, category = "BODY"): Promise<PendingShot> {
+  const res = await fetch("/api/upload-shot-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      assetId,
+      filename: file.name,
+      contentType: file.type || "video/mp4",
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to get shot upload URL (${res.status})`);
+  }
+
+  const { url, key } = await res.json();
+  const uploadRes = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "video/mp4" },
+    body: file,
+  });
+
+  if (!uploadRes.ok) {
+    throw new Error(`Shot upload failed (${uploadRes.status})`);
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    r2Key: key,
+    category,
+    shotType: SHOT_TYPES[index % SHOT_TYPES.length],
+    durationSec: 6,
+    filename: file.name,
+  };
+}
+
 type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "converting-music" | "saving" | "done";
 
 interface SetupFormProps {
   onComplete: () => void;
   editingAsset?: Asset | null;
   onCancelEdit?: () => void;
+  initialName?: string;
+  initialPersonaPrompt?: string;
+  initialVideoSource?: "edited" | "builder";
+  studioVideoFiles?: File[];
+  onOpenVideoBuilder?: () => void;
 }
 
-export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormProps) {
+export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], onOpenVideoBuilder }: SetupFormProps) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [videoSource, setVideoSource] = useState<"edited" | "builder">("edited");
@@ -162,6 +207,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const [tempAssetId] = useState(() => crypto.randomUUID());
   const [pendingShots, setPendingShots] = useState<PendingShot[]>([]);
+  const [shuffleStudioClips, setShuffleStudioClips] = useState(false);
+  const [selectedShuffleClipKeys, setSelectedShuffleClipKeys] = useState<string[]>([]);
   const [shotCategory, setShotCategory] = useState<string>("BODY");
   const [shotType, setShotType] = useState<string>("");
   const [shotUploading, setShotUploading] = useState(false);
@@ -190,6 +237,15 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const isEditing = !!editingAsset;
   const isUploading = uploadStep !== "idle" && uploadStep !== "done";
+
+  useEffect(() => {
+    const availableKeys = studioVideoFiles.map(studioClipKey);
+    setSelectedShuffleClipKeys((current) => {
+      const kept = current.filter((key) => availableKeys.includes(key));
+      const missing = availableKeys.filter((key) => !kept.includes(key));
+      return [...kept, ...missing];
+    });
+  }, [studioVideoFiles]);
 
   useEffect(() => {
     if (!sourceFile) {
@@ -244,6 +300,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setMusic(null);
     }
   }, [editingAsset]);
+
+  useEffect(() => {
+    if (editingAsset) return;
+    if (initialName && !name) setName(initialName);
+    if (initialPersonaPrompt && !personaPrompt) setPersonaPrompt(initialPersonaPrompt);
+    if (initialVideoSource) setVideoSource(initialVideoSource);
+  }, [editingAsset, initialName, initialPersonaPrompt, initialVideoSource, name, personaPrompt]);
 
   const voicesQuery = useQuery<Voice[]>({
     queryKey: ["/api/elevenlabs/voices"],
@@ -395,7 +458,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
     if (!photo) return;
     if (videoSource === "edited" && !video) return;
-    if (videoSource === "builder" && pendingShots.length === 0) return;
+    if (videoSource === "builder" && pendingShots.length === 0 && studioVideoFiles.length === 0) return;
 
     const photoSizeMB = photo.size / 1024 / 1024;
     if (photoSizeMB > MAX_FILE_SIZE_MB) {
@@ -469,8 +532,17 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
       const createdAsset = await res.json();
 
-      if (videoSource === "builder" && pendingShots.length > 0) {
-        for (const shot of pendingShots) {
+      if (videoSource === "builder") {
+        const studioShots = studioVideoFiles.length > 0
+          ? await Promise.all(studioVideoFiles.map((file, index) => {
+            const category = shuffleStudioClips
+              ? selectedShuffleClipKeys.includes(studioClipKey(file)) ? `SHUFFLE_${index}` : `FIXED_${index}`
+              : `FIXED_${index}`;
+            return uploadStudioShot(file, createdAsset.id, index, category);
+          }))
+          : [];
+        const shotsToSave = [...pendingShots, ...studioShots];
+        for (const shot of shotsToSave) {
           await fetch(`/api/assets/${createdAsset.id}/shots`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -505,6 +577,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
       setHookHeadline(false);
       setHookPrompt("");
       setPendingShots([]);
+      setShuffleStudioClips(false);
+      setSelectedShuffleClipKeys([]);
       setSourceFile(null);
       setSourceR2Key(null);
       if (photoInputRef.current) photoInputRef.current.value = "";
@@ -578,13 +652,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
 
   const canSave = isEditing
     ? name && personaPrompt && voiceId
-    : name && personaPrompt && photo && (videoSource === "builder" ? pendingShots.length > 0 : !!video) && voiceId;
+    : name && personaPrompt && photo && (videoSource === "builder" ? pendingShots.length > 0 || studioVideoFiles.length > 0 : !!video) && voiceId;
 
   const missingFields = [];
   if (!name) missingFields.push("Setup Name");
   if (!isEditing && !photo) missingFields.push("Product Photo");
   if (!isEditing && videoSource === "edited" && !video) missingFields.push("Edited Video");
-  if (!isEditing && videoSource === "builder" && pendingShots.length === 0) missingFields.push("At least 1 shot clip");
+  if (!isEditing && videoSource === "builder" && pendingShots.length === 0 && studioVideoFiles.length === 0) missingFields.push("At least 1 Studio clip");
   if (!personaPrompt) missingFields.push("Persona Prompt");
   if (!voiceId) missingFields.push("Voice");
 
@@ -609,17 +683,17 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="mx-auto max-w-3xl space-y-5 px-1 sm:px-0">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />
-            {isEditing ? `Edit Setup: ${editingAsset?.name}` : "Create New Setup"}
+            {isEditing ? `Edit: ${editingAsset?.name}` : "New Setup"}
           </CardTitle>
           <CardDescription>
             {isEditing
-              ? "Update your setup settings. You can replace the photo and video files below."
-              : "Upload your product photo and edited video, configure your persona and voice settings."}
+              ? "Update files, prompt, and voice."
+              : "Upload assets, set voice, save."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -647,8 +721,18 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                   accept="image/*"
                   onChange={(e) => setPhoto(e.target.files?.[0] || null)}
                   disabled={isUploading}
-                  className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                  className="hidden"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full justify-center gap-2 sm:w-auto"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  <Image className="h-4 w-4" />
+                  {photo ? "Replace photo" : "Upload photo"}
+                </Button>
                 {photo && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Image className="w-3 h-3" />
@@ -661,20 +745,24 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 <Label>Video Source</Label>
                 <RadioGroup
                   value={videoSource}
-                  onValueChange={(v) => setVideoSource(v as "edited" | "builder")}
-                  className="flex gap-4"
+                  onValueChange={(v) => {
+                    const nextSource = v as "edited" | "builder";
+                    setVideoSource(nextSource);
+                    if (nextSource === "builder") onOpenVideoBuilder?.();
+                  }}
+                  className="grid grid-cols-2 gap-2"
                   disabled={isUploading}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
                     <RadioGroupItem value="edited" id="vs-edited" data-testid="radio-video-edited" />
-                    <Label htmlFor="vs-edited" className="flex items-center gap-1.5 cursor-pointer">
+                    <Label htmlFor="vs-edited" className="flex cursor-pointer items-center gap-1.5 text-sm leading-tight">
                       <Film className="w-4 h-4" />
                       Edited Video
                     </Label>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
                     <RadioGroupItem value="builder" id="vs-builder" data-testid="radio-video-builder" />
-                    <Label htmlFor="vs-builder" className="flex items-center gap-1.5 cursor-pointer">
+                    <Label htmlFor="vs-builder" className="flex cursor-pointer items-center gap-1.5 text-sm leading-tight">
                       <Clapperboard className="w-4 h-4" />
                       Video Builder
                     </Label>
@@ -682,8 +770,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                 </RadioGroup>
                 <p className="text-xs text-muted-foreground">
                   {videoSource === "edited"
-                    ? "Upload an already-edited video to use as the base."
-                    : "Upload shot clips below. When you activate, a video will be auto-built from your clips and sent to the AI pipeline."}
+                    ? "Use one ready video."
+                    : "Upload clips and Buzzly builds the cut."}
                 </p>
               </div>
 
@@ -698,8 +786,18 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                     accept="video/*"
                     onChange={(e) => setVideo(e.target.files?.[0] || null)}
                     disabled={isUploading}
-                    className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                    className="hidden"
                   />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full justify-center gap-2 sm:w-auto"
+                    onClick={() => videoInputRef.current?.click()}
+                    disabled={isUploading}
+                  >
+                    <Film className="h-4 w-4" />
+                    {video ? "Replace video" : "Upload video"}
+                  </Button>
                   {video && (
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       <Film className="w-3 h-3" />
@@ -716,184 +814,68 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
               )}
 
               {videoSource === "builder" && (
-                <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
                   <div className="flex items-center gap-2">
-                    <Clapperboard className="w-4 h-4" />
-                    <h4 className="text-sm font-medium">Shot Library</h4>
+                    <Clapperboard className="w-4 h-4 text-primary" />
+                    <h4 className="text-sm font-medium">Video Builder opens in Studio</h4>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Upload a source video, then trim multiple shots from it. Need at least 1 HOOK and 4 BODY shots with different types.
+                    Upload clips, trim, arrange, then tap Done edit. You can reopen this anytime.
                   </p>
-
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Source Video</Label>
-                      {!sourceFile ? (
-                        <Input
-                          ref={sourceInputRef}
-                          data-testid="input-source-video"
-                          type="file"
-                          accept="video/*"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            if (f) {
-                              setSourceFile(f);
-                              setSourceR2Key(null);
-                              handleUploadSource(f);
-                            }
-                          }}
-                          disabled={sourceUploading || trimming || isUploading}
-                          className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-xs text-xs"
-                        />
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Film className="w-3 h-3" />
-                              {sourceFile.name} ({(sourceFile.size / 1024 / 1024).toFixed(1)} MB)
-                              {sourceR2Key && <CheckCircle2 className="w-3 h-3 text-green-500" />}
-                            </p>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-xs"
-                              onClick={() => {
-                                setSourceFile(null);
-                                setSourceR2Key(null);
-                                if (sourceInputRef.current) sourceInputRef.current.value = "";
-                              }}
-                              disabled={sourceUploading || trimming}
-                              data-testid="button-change-source"
-                            >
-                              Change
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {sourceUploading && (
-                        <div className="space-y-1">
-                          <Progress value={sourceUploadProgress} className="h-2" />
-                          <p className="text-xs text-muted-foreground">Uploading source video... {sourceUploadProgress}%</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {sourceFile && sourceR2Key && sourceVideoUrl && (
-                      <>
-                        <VideoTrimmer
-                          videoSrc={sourceVideoUrl}
-                          duration={videoDuration}
-                          startTime={trimStart}
-                          endTime={trimEnd}
-                          onStartChange={setTrimStart}
-                          onEndChange={setTrimEnd}
-                          disabled={trimming}
-                        />
-
-                        <Separator />
-
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2">
-                            <Scissors className="w-4 h-4" />
-                            <h4 className="text-xs font-medium">Shot Details</h4>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                              <Label className="text-[10px]">Category</Label>
-                              <Select value={shotCategory} onValueChange={setShotCategory} disabled={trimming || isUploading}>
-                                <SelectTrigger data-testid="select-shot-category" className="h-8 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {CATEGORIES.map((c) => (
-                                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[10px]">Shot Type {shotCategory === "BODY" ? "(required)" : "(optional)"}</Label>
-                              <Select value={shotType} onValueChange={setShotType} disabled={trimming || isUploading}>
-                                <SelectTrigger data-testid="select-shot-type" className="h-8 text-xs">
-                                  <SelectValue placeholder="Select type..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">None</SelectItem>
-                                  {SHOT_TYPES.map((t) => (
-                                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-
-                          {trimming && (
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                <p className="text-xs text-muted-foreground">Trimming clip on server...</p>
-                              </div>
-                            </div>
-                          )}
-
-                          <Button
-                            onClick={handleTrimShot}
-                            disabled={!sourceR2Key || trimming || isUploading || (shotCategory === "BODY" && (!shotType || shotType === "none")) || trimEnd <= trimStart}
-                            data-testid="button-trim-shot"
-                            size="sm"
-                            className="w-full"
-                          >
-                            {trimming ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Scissors className="w-3 h-3 mr-1" />}
-                            Trim & Add Shot
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {pendingShots.length > 0 && (
-                    <>
-                      <Separator />
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-medium">Shots ({pendingShots.length})</h4>
-                          <div className="flex gap-1 flex-wrap">
-                            {CATEGORIES.map((c) => shotCounts[c] ? (
-                              <Badge key={c} variant="outline" className="text-[10px] px-1.5 py-0">
-                                {c}: {shotCounts[c]}
-                              </Badge>
-                            ) : null)}
-                          </div>
-                        </div>
-                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                          {pendingShots.map((shot) => (
-                            <div key={shot.id} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-muted/50" data-testid={`shot-item-${shot.id}`}>
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <Badge className={`text-[10px] shrink-0 ${CATEGORY_COLORS[shot.category] || ""}`}>
-                                  {shot.category}
-                                </Badge>
-                                {shot.shotType && (
-                                  <span className="text-[10px] text-muted-foreground">{shot.shotType}</span>
-                                )}
-                                <span className="text-[10px] text-muted-foreground truncate">{shot.filename}</span>
-                                <span className="text-[10px] text-muted-foreground shrink-0">{shot.durationSec}s</span>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-5 w-5 shrink-0"
-                                onClick={() => handleDeletePendingShot(shot.id)}
-                                data-testid={`button-delete-shot-${shot.id}`}
-                              >
-                                <Trash2 className="w-3 h-3 text-destructive" />
-                              </Button>
-                            </div>
-                          ))}
+                  <Button type="button" className="h-11 w-full justify-center gap-2 sm:w-auto" onClick={onOpenVideoBuilder}>
+                    <Clapperboard className="h-4 w-4" />
+                    {studioVideoFiles.length > 0 ? "Edit in Studio" : "Open Studio Builder"}
+                  </Button>
+                  {studioVideoFiles.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-medium text-emerald-500">
+                          {studioVideoFiles.length} clip{studioVideoFiles.length === 1 ? "" : "s"} ready from Studio
+                        </p>
+                        <div className="flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1.5">
+                          <Label htmlFor="shuffle-studio-clips" className="text-[11px] text-muted-foreground">
+                            Shuffle clips
+                          </Label>
+                          <Switch
+                            id="shuffle-studio-clips"
+                            checked={shuffleStudioClips}
+                            onCheckedChange={setShuffleStudioClips}
+                          />
                         </div>
                       </div>
-                    </>
+                      {shuffleStudioClips && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Checked clips can swap order every Activate. Unchecked clips stay fixed.
+                        </p>
+                      )}
+                      <div className="grid gap-1 sm:grid-cols-2">
+                        {studioVideoFiles.slice(0, 12).map((file, index) => {
+                          const key = studioClipKey(file);
+                          const checked = selectedShuffleClipKeys.includes(key);
+                          return (
+                            <label
+                              key={key}
+                              className="flex min-w-0 items-center gap-2 rounded-md bg-background px-2 py-1.5 text-[10px] text-muted-foreground"
+                            >
+                              {shuffleStudioClips && (
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(value) => {
+                                    setSelectedShuffleClipKeys((current) => (
+                                      value
+                                        ? Array.from(new Set([...current, key]))
+                                        : current.filter((item) => item !== key)
+                                    ));
+                                  }}
+                                />
+                              )}
+                              <span className="shrink-0 text-[10px] text-muted-foreground/70">{index + 1}</span>
+                              <span className="truncate">{file.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -1126,7 +1108,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                       </SelectItem>
                     ))}
                     {!elModelsQuery.data?.length && !elModelsQuery.isLoading && (
-                      <SelectItem value="eleven_multilingual_v2">Eleven Multilingual v2</SelectItem>
+                      <>
+                        <SelectItem value="eleven_turbo_v2_5">Eleven Turbo v2.5</SelectItem>
+                        <SelectItem value="eleven_multilingual_v2">Eleven Multilingual v2</SelectItem>
+                      </>
                     )}
                   </SelectContent>
                 </Select>
@@ -1251,12 +1236,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
           <div className="space-y-4">
             <h3 className="text-sm font-medium flex items-center gap-2">
               <Music className="w-4 h-4" />
-              Background Music (Optional)
+              Music optional
             </h3>
 
             {!isEditing && (
               <div className="space-y-2">
-                <Label htmlFor="music-upload">Music Track</Label>
+                <Label htmlFor="music-upload">Track</Label>
                 <Input
                   ref={musicInputRef}
                   id="music-upload"
@@ -1265,8 +1250,18 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                   accept="audio/*,video/*"
                   onChange={(e) => setMusic(e.target.files?.[0] || null)}
                   disabled={isUploading}
-                  className="file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground file:text-sm"
+                  className="hidden"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full justify-center gap-2 sm:w-auto"
+                  onClick={() => musicInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  <Music className="h-4 w-4" />
+                  {music ? "Replace music" : "Upload music"}
+                </Button>
                 {music && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Music className="w-3 h-3" />
@@ -1277,7 +1272,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit }: SetupFormP
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Upload an audio or video file. If you upload a video, the audio track will be automatically extracted.
+                  Audio or video. We extract audio from video.
                 </p>
               </div>
             )}

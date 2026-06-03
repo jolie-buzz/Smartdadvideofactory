@@ -24,7 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import type { BuzzlyClipType, BuzzlyTimelineItem, BuzzlyTimelineJson } from "@shared/models/timeline";
@@ -63,6 +63,7 @@ type TimelinePanelProps = {
   onUpdateItem: (id: string, patch: Partial<BuzzlyTimelineItem>) => void;
   onSeek: (time: number) => void;
   onToolAction: (tool: TimelineToolAction) => void;
+  onTrackUpload?: (type: Extract<BuzzlyClipType, "video" | "image" | "audio">) => void;
   onMoveItem: (id: string, startTime: number, ripple?: boolean) => void;
   onTrimItem: (id: string, patch: Partial<BuzzlyTimelineItem>) => void;
   onApplyTransition: (leftId: string, rightId: string, preset: TimelineTransitionPreset) => void;
@@ -88,9 +89,171 @@ const colorByType: Record<BuzzlyClipType, string> = {
 const formatSeconds = (seconds: number) => `${Math.round(seconds)}s`;
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const SNAP_THRESHOLD_SECONDS = 0.35;
+const MAX_VIDEO_THUMBNAILS = 60;
+const LEFT_COLUMN_WIDTH = 148;
+const DEFAULT_PIXELS_PER_SECOND = 75;
+const MIN_PIXELS_PER_SECOND = 20;
+const MAX_PIXELS_PER_SECOND = 300;
+type TimelineThumbnail = {
+  time: number;
+  url: string;
+};
 
-export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedItemIds = [], onSelectItem, onToggleItemSelection, onUpdateItem, onSeek, onToolAction, onMoveItem, onTrimItem, onApplyTransition, onGenerateAiTransition }: TimelinePanelProps) {
+type CachedThumbnailEntry = {
+  signature: string;
+  thumbnails: TimelineThumbnail[];
+};
+
+const cachedThumbnails = new Map<string, CachedThumbnailEntry>();
+
+const waitForVideoEvent = (video: HTMLVideoElement, eventName: "loadedmetadata" | "seeked") =>
+  new Promise<void>((resolve, reject) => {
+    const handleSuccess = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error(`Video ${eventName} failed`));
+    };
+    const cleanup = () => {
+      video.removeEventListener(eventName, handleSuccess);
+      video.removeEventListener("error", handleError);
+    };
+    video.addEventListener(eventName, handleSuccess, { once: true });
+    video.addEventListener("error", handleError, { once: true });
+  });
+
+function TimelineVideoFilmstrip({ item }: { item: BuzzlyTimelineItem }) {
+  const cacheSignature = `${item.source?.uri || ""}|${item.trimStart}|${item.trimEnd}|${item.duration}`;
+  const [thumbnails, setThumbnails] = useState<TimelineThumbnail[]>(() => {
+    const cached = cachedThumbnails.get(item.id);
+    return cached?.signature === cacheSignature ? cached.thumbnails : [];
+  });
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!item.source?.uri) return;
+    let cancelled = false;
+
+    const cached = cachedThumbnails.get(item.id);
+    if (cached?.signature === cacheSignature) {
+      setThumbnails(cached.thumbnails);
+      setFailed(false);
+      return;
+    }
+
+    setFailed(false);
+
+    const generateFrames = async () => {
+      const video = document.createElement("video");
+      video.src = item.source?.uri || "";
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.crossOrigin = "anonymous";
+
+      if (video.readyState < 1) await waitForVideoEvent(video, "loadedmetadata");
+      if (cancelled) return;
+
+      const canvas = document.createElement("canvas");
+      const sourceWidth = video.videoWidth || 160;
+      const sourceHeight = video.videoHeight || 90;
+      const scale = Math.min(1, 180 / sourceWidth);
+      canvas.width = Math.max(96, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(54, Math.round(sourceHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas unavailable");
+
+      const start = clampNumber(item.trimStart, 0, Math.max(0, video.duration || item.trimEnd));
+      const usableDuration = Math.max(0.1, item.duration);
+      const generationInterval = item.duration > MAX_VIDEO_THUMBNAILS ? item.duration / MAX_VIDEO_THUMBNAILS : 1;
+      const frameCount = clampNumber(Math.ceil(item.duration / generationInterval), 2, MAX_VIDEO_THUMBNAILS);
+      const nextThumbnails: TimelineThumbnail[] = [];
+
+      for (let index = 0; index < frameCount; index += 1) {
+        if (cancelled) return;
+        const maxSampleTime = Math.max(0.04, Math.min(video.duration || item.trimEnd, start + usableDuration) - 0.05);
+        const localTime = Math.min(index * generationInterval, item.duration);
+        const sampleTime = clampNumber(start + localTime, 0.04, maxSampleTime);
+        const seekPromise = Math.abs(video.currentTime - sampleTime) > 0.02 ? waitForVideoEvent(video, "seeked") : Promise.resolve();
+        video.currentTime = sampleTime;
+        await seekPromise;
+        if (cancelled) return;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        nextThumbnails.push({
+          time: localTime,
+          url: canvas.toDataURL("image/jpeg", 0.64),
+        });
+      }
+
+      cachedThumbnails.set(item.id, { signature: cacheSignature, thumbnails: nextThumbnails });
+      while (cachedThumbnails.size > 24) {
+        const oldestKey = cachedThumbnails.keys().next().value;
+        if (!oldestKey) break;
+        cachedThumbnails.delete(oldestKey);
+      }
+      if (!cancelled) setThumbnails(nextThumbnails);
+    };
+
+    generateFrames().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheSignature, item.duration, item.id, item.source?.uri, item.trimEnd, item.trimStart]);
+
+  if (failed) {
+    return (
+      <div className="absolute inset-0 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.28)_0_10px,rgba(0,0,0,0.2)_10px_20px)] opacity-60" />
+    );
+  }
+
+  if (thumbnails.length === 0) {
+    return (
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,196,0,0.22),rgba(255,255,255,0.16),rgba(255,196,0,0.22))]" />
+    );
+  }
+
+  return (
+    <div className="absolute inset-0 grid gap-0" style={{ gridTemplateColumns: `repeat(${thumbnails.length}, minmax(0, 1fr))` }}>
+      {thumbnails.map((thumbnail, index) => (
+        <img
+          key={`${item.id}-frame-${index}-${thumbnail.time}`}
+          src={thumbnail.url}
+          alt=""
+          className="h-full w-full border-0 object-cover opacity-90"
+          aria-hidden="true"
+        />
+      ))}
+    </div>
+  );
+}
+
+function TimelineClipPreview({ item }: { item: BuzzlyTimelineItem }) {
+  if (!item.source?.uri || (item.type !== "video" && item.type !== "image")) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      {item.type === "image" ? (
+        <img src={item.source.uri} alt="" className="h-full w-full object-cover opacity-65" aria-hidden="true" />
+      ) : (
+        <TimelineVideoFilmstrip item={item} />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/10 to-black/55" />
+      {item.type === "video" && (
+        <div className="absolute inset-x-3 bottom-2 h-2 rounded bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.42)_0_8px,rgba(0,0,0,0.18)_8px_16px)] opacity-70" />
+      )}
+    </div>
+  );
+}
+
+export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedItemIds = [], onSelectItem, onToggleItemSelection, onUpdateItem, onSeek, onToolAction, onTrackUpload, onMoveItem, onTrimItem, onApplyTransition, onGenerateAiTransition }: TimelinePanelProps) {
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND);
+  const [visibleTrackWidth, setVisibleTrackWidth] = useState(1080);
   const [transitionPair, setTransitionPair] = useState<{ leftId: string; rightId: string; x: number; y: number } | null>(null);
   const [aiPrompt, setAiPrompt] = useState("smooth product swipe transition, fast social ad style");
   const [aiSeconds, setAiSeconds] = useState(4);
@@ -98,8 +261,28 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const [aiProgress, setAiProgress] = useState(0);
   const [aiStatus, setAiStatus] = useState("");
   const [aiError, setAiError] = useState("");
-  const timelineWidth = Math.max(1080, timeline.project.duration * 58);
-  const playheadLeft = 148 + clampNumber((currentTime / timeline.project.duration) * timelineWidth, 0, timelineWidth);
+  useEffect(() => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return;
+
+    const updateVisibleWidth = () => {
+      setVisibleTrackWidth(Math.max(320, scrollArea.clientWidth - LEFT_COLUMN_WIDTH));
+    };
+    updateVisibleWidth();
+
+    const resizeObserver = new ResizeObserver(updateVisibleWidth);
+    resizeObserver.observe(scrollArea);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const fitPixelsPerSecond = clampNumber(visibleTrackWidth / Math.max(1, timeline.project.duration), MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND);
+  const timelineWidth = Math.max(visibleTrackWidth, timeline.project.duration * pixelsPerSecond);
+  const effectivePixelsPerSecond = timelineWidth / Math.max(1, timeline.project.duration);
+  const playheadLeft = LEFT_COLUMN_WIDTH + clampNumber(currentTime * effectivePixelsPerSecond, 0, timelineWidth);
+
+  useEffect(() => {
+    setPixelsPerSecond((value) => Math.max(value, fitPixelsPerSecond));
+  }, [fitPixelsPerSecond]);
   const markerStep = timeline.project.duration > 60 ? 10 : 5;
   const markers = Array.from(
     { length: Math.floor(timeline.project.duration / markerStep) + 1 },
@@ -119,8 +302,6 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
             { label: "Split", icon: Scissors, action: "split" as const },
             { label: "Duplicate", icon: Copy, action: "duplicate" as const },
             { label: "Delete", icon: Trash2, action: "delete" as const },
-            { label: "Zoom +", icon: ZoomIn, action: "zoom-in" as const },
-            { label: "Zoom -", icon: ZoomOut, action: "zoom-out" as const },
             { label: "Zoom In", icon: ZoomIn, action: "zoom-in-motion" as const },
             { label: "Zoom Out", icon: ZoomOut, action: "zoom-out-motion" as const },
             { label: "Fit", icon: Maximize2, action: "fit" as const },
@@ -186,6 +367,26 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
               })}
             </div>
           )}
+        </div>
+        <div className="mx-2 flex min-w-[220px] items-center gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-2">
+          <span className="text-[11px] font-medium text-slate-400">Scale</span>
+          <Slider
+            value={[pixelsPerSecond]}
+            min={MIN_PIXELS_PER_SECOND}
+            max={MAX_PIXELS_PER_SECOND}
+            step={1}
+            onValueChange={([value]) => setPixelsPerSecond(value)}
+            className="w-32"
+          />
+          <span className="w-14 text-right text-[11px] font-medium text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-7 px-2 text-[11px] text-slate-300 hover:bg-white/10 hover:text-white"
+            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
+          >
+            Fit
+          </Button>
         </div>
         <div className="flex items-center gap-3">
           {selectedItem && (
@@ -255,26 +456,50 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
         </div>
       </div>
 
+      <div className="hidden items-center justify-between gap-2 border-b border-white/10 bg-[#0d131c] px-3 py-2 max-md:flex">
+        <div className="text-[11px] font-medium text-slate-400">
+          Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
+        </div>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Slider
+            value={[pixelsPerSecond]}
+            min={MIN_PIXELS_PER_SECOND}
+            max={MAX_PIXELS_PER_SECOND}
+            step={1}
+            onValueChange={([value]) => setPixelsPerSecond(value)}
+            className="min-w-0 flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 border-white/10 bg-white/[0.04] px-3 text-xs text-white hover:bg-white/10"
+            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
+          >
+            Fit
+          </Button>
+        </div>
+      </div>
+
       <div
         ref={scrollAreaRef}
         className="relative min-h-0 w-full max-w-full flex-1 overflow-auto [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin]"
       >
-        <div className="min-h-full" style={{ width: 148 + timelineWidth }}>
-          <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `148px ${timelineWidth}px` }}>
+        <div className="min-h-full" style={{ width: LEFT_COLUMN_WIDTH + timelineWidth }}>
+          <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `${LEFT_COLUMN_WIDTH}px ${timelineWidth}px` }}>
             <div className="sticky left-0 z-30 border-r border-white/10 bg-[#0a0f17] px-4 py-2 text-xs text-slate-500 max-md:w-[112px] max-md:px-3">0s</div>
             <button
               type="button"
               className="relative h-9 cursor-crosshair overflow-hidden text-left max-md:h-11"
               onClick={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
-                onSeek(((event.clientX - rect.left) / rect.width) * timeline.project.duration);
+                onSeek(clampNumber((event.clientX - rect.left) / effectivePixelsPerSecond, 0, timeline.project.duration));
               }}
             >
               {markers.map((time) => (
                 <span
                   key={time}
                   className="absolute top-2 text-[11px] text-slate-400"
-                  style={{ left: `${(time / timeline.project.duration) * 100}%` }}
+                  style={{ left: time * effectivePixelsPerSecond }}
                 >
                   {time}s
                 </span>
@@ -289,23 +514,37 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
 
             {timeline.tracks.map((track) => {
               const TrackIcon = iconByType[track.type];
+              const uploadType = track.type === "video" || track.type === "image" || track.type === "audio" ? track.type : null;
               return (
-            <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `148px ${timelineWidth}px` }}>
+            <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `${LEFT_COLUMN_WIDTH}px ${timelineWidth}px` }}>
               <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3 max-md:w-[112px] max-md:gap-2 max-md:px-3">
-                <TrackIcon className="h-4 w-4 text-slate-300" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-white max-md:text-xs">{track.name.replace(" Track", "")}</p>
-                </div>
+                <button
+                  type="button"
+                  className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition max-md:gap-2 ${
+                    uploadType ? "cursor-pointer text-white hover:bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-[#ffc400]" : "cursor-default"
+                  }`}
+                  title={uploadType ? `Upload ${uploadType}` : track.name}
+                  onClick={() => {
+                    if (uploadType) onTrackUpload?.(uploadType);
+                  }}
+                >
+                  <TrackIcon className="h-4 w-4 shrink-0 text-slate-300" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-white max-md:text-xs">
+                    {track.name.replace(" Track", "")}
+                  </span>
+                  {uploadType && <Plus className="hidden h-3.5 w-3.5 shrink-0 text-[#ffc400] max-md:block" />}
+                </button>
                 <Eye className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
                 <Lock className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
               </div>
               <div
                 data-track-lane={track.id}
                 className="relative min-h-[56px] overflow-hidden bg-[linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[length:8.33%_100%] px-2 py-2 max-md:min-h-[76px] max-md:py-3"
+                style={{ backgroundSize: `${effectivePixelsPerSecond}px 100%` }}
                 onClick={(event) => {
                   if (event.target !== event.currentTarget) return;
                   const rect = event.currentTarget.getBoundingClientRect();
-                  onSeek(((event.clientX - rect.left) / rect.width) * timeline.project.duration);
+                  onSeek(clampNumber((event.clientX - rect.left) / effectivePixelsPerSecond, 0, timeline.project.duration));
                 }}
               >
                 {[...track.items]
@@ -316,9 +555,9 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     const endTime = item.startTime + item.duration;
                     const gap = Number((next.startTime - endTime).toFixed(2));
                     const isTouching = Math.abs(gap) <= 0.05;
-                    const markerLeft = `${(endTime / timeline.project.duration) * 100}%`;
-                    const gapLeft = `${(endTime / timeline.project.duration) * 100}%`;
-                    const gapWidth = `${Math.max(0, (gap / timeline.project.duration) * 100)}%`;
+                    const markerLeft = endTime * effectivePixelsPerSecond;
+                    const gapLeft = endTime * effectivePixelsPerSecond;
+                    const gapWidth = Math.max(0, gap * effectivePixelsPerSecond);
                     return (
                       <div key={`${item.id}-${next.id}-transition`}>
                         {gap > 0.05 && (
@@ -350,13 +589,13 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     );
                   })}
                 {track.items.map((item) => {
-                  const left = `${Math.max(0, (item.startTime / timeline.project.duration) * 100)}%`;
-                  const width = `${Math.max(5, (item.duration / timeline.project.duration) * 100)}%`;
+                  const left = Math.max(0, item.startTime * effectivePixelsPerSecond);
+                  const width = Math.max(44, item.duration * effectivePixelsPerSecond);
                   const selected = selectedItemId === item.id || selectedItemIds.includes(item.id);
                   const timelineRectToSeconds = (clientX: number) => {
                     const rect = document.querySelector(`[data-track-lane="${track.id}"]`)?.getBoundingClientRect();
                     if (!rect) return item.startTime;
-                    return clampNumber(((clientX - rect.left) / rect.width) * timeline.project.duration, 0, timeline.project.duration);
+                    return clampNumber((clientX - rect.left) / effectivePixelsPerSecond, 0, timeline.project.duration);
                   };
                   const snapStartTime = (startTime: number) => {
                     const neighbors = track.items.filter((candidate) => candidate.id !== item.id);
@@ -482,11 +721,14 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                       } cursor-grab active:cursor-grabbing`}
                       style={{ left, width }}
                     >
-                      <span className="block truncate font-medium">{item.text || item.name}</span>
-                      {item.type === "video" && <span className="mt-1 block h-2 rounded bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.2)_0_8px,rgba(0,0,0,0.2)_8px_16px)]" />}
-                      {item.type === "audio" && <span className="mt-1 block h-2 rounded bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.15)_0_2px,transparent_2px_5px)]" />}
+                      <TimelineClipPreview item={item} />
+                      <span className="relative z-10 block truncate font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
+                        {item.text || item.name}
+                      </span>
+                      {item.type === "video" && !item.source?.uri && <span className="relative z-10 mt-1 block h-2 rounded bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.2)_0_8px,rgba(0,0,0,0.2)_8px_16px)]" />}
+                      {item.type === "audio" && <span className="relative z-10 mt-1 block h-2 rounded bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.15)_0_2px,transparent_2px_5px)]" />}
                       {selected && (
-                        <span className="absolute right-1 top-1 rounded bg-black/45 px-1 text-[10px] text-[#ffc400]">
+                        <span className="absolute right-1 top-1 z-10 rounded bg-black/55 px-1 text-[10px] text-[#ffc400]">
                           {item.playbackRate && item.playbackRate !== 1 ? `${item.playbackRate}x` : item.effectPreset && item.effectPreset !== "none" ? item.effectPreset : `${Math.round(item.scale * 100)}%`}
                         </span>
                       )}

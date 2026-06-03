@@ -2163,6 +2163,11 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                 onUpdateItem={updateItem}
                 onSeek={seekTo}
                 onToolAction={handleTimelineToolAction}
+                onTrackUpload={(type) => {
+                  if (type === "video") videoLayerInputRef.current?.click();
+                  if (type === "image") imageLayerInputRef.current?.click();
+                  if (type === "audio") musicLayerInputRef.current?.click();
+                }}
                 onMoveItem={moveTimelineItem}
                 onTrimItem={updateItem}
                 onApplyTransition={applyTransitionBetweenClips}
@@ -2174,16 +2179,6 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           </main>
         </div>
       </div>
-
-      {!isProductionRail && mainVideoClipCount === 0 && (
-        <Button
-          className="fixed bottom-[calc(env(safe-area-inset-bottom)+88px)] right-4 z-40 h-12 gap-2 rounded-full bg-[#ffc400] px-5 font-semibold text-black shadow-2xl hover:bg-[#ffd84a] md:hidden"
-          onClick={() => videoLayerInputRef.current?.click()}
-        >
-          <Plus className="h-5 w-5" />
-          Add clip
-        </Button>
-      )}
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#090d14]/96 px-2 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-2 backdrop-blur md:hidden">
         <div className="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Clock, ShieldX, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 
 function AuthenticatedApp() {
   const { user, isLoading, logout } = useAuth();
@@ -88,6 +89,7 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <AuthenticatedApp />
+        <PwaInstallPrompt />
       </TooltipProvider>
     </QueryClientProvider>
   );

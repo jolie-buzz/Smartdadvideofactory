@@ -2178,7 +2178,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               )}
             </section>
 
-            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[26dvh] max-md:p-0">
+            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[34dvh] max-md:p-0">
               <TimelinePanel
                 timeline={timeline}
                 currentTime={currentTime}

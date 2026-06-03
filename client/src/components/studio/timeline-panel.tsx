@@ -461,30 +461,6 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
         </div>
       </div>
 
-      <div className="hidden items-center justify-between gap-2 border-b border-white/10 bg-[#0d131c] px-3 py-1.5 max-md:flex">
-        <div className="text-[11px] font-medium text-slate-400">
-          Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
-        </div>
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Slider
-            value={[pixelsPerSecond]}
-            min={MIN_PIXELS_PER_SECOND}
-            max={MAX_PIXELS_PER_SECOND}
-            step={1}
-            onValueChange={([value]) => setPixelsPerSecond(value)}
-            className="min-w-0 flex-1"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 border-white/10 bg-white/[0.04] px-3 text-xs text-white hover:bg-white/10"
-            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
-          >
-            Fit
-          </Button>
-        </div>
-      </div>
-
       <div
         ref={scrollAreaRef}
         className="relative min-h-0 w-full max-w-full flex-1 overflow-auto [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin]"
@@ -766,6 +742,103 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
             })}
           </div>
         </div>
+      </div>
+      <div className="hidden shrink-0 border-t border-white/10 bg-[#0b1018] max-md:block">
+        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+          <div className="text-[11px] font-medium text-slate-400">
+            Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
+          </div>
+          <Slider
+            value={[pixelsPerSecond]}
+            min={MIN_PIXELS_PER_SECOND}
+            max={MAX_PIXELS_PER_SECOND}
+            step={1}
+            onValueChange={([value]) => setPixelsPerSecond(value)}
+            className="min-w-0 flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 border-white/10 bg-white/[0.04] px-3 text-xs text-white hover:bg-white/10"
+            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
+          >
+            Fit
+          </Button>
+        </div>
+        <div className="flex gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { label: "Split", icon: Scissors, action: "split" as const },
+            { label: "Duplicate", icon: Copy, action: "duplicate" as const },
+            { label: "Delete", icon: Trash2, action: "delete" as const },
+            { label: "Zoom In", icon: ZoomIn, action: "zoom-in-motion" as const },
+            { label: "Zoom Out", icon: ZoomOut, action: "zoom-out-motion" as const },
+            { label: "Fade", icon: Sparkles, action: "fade" as const },
+            { label: selectedItem?.playbackRate && selectedItem.playbackRate !== 1 ? `${selectedItem.playbackRate}x` : "Speed", icon: Zap, action: "speed" as const },
+            { label: "Enhance", icon: WandSparkles, action: "enhance" as const },
+            { label: "Reset", icon: RotateCcw, action: "reset" as const },
+          ].map((tool) => {
+            const Icon = tool.icon;
+            const activeTool = tool.action === "speed" && !!selectedItem?.playbackRate && selectedItem.playbackRate !== 1;
+            return (
+              <button
+                key={tool.action}
+                type="button"
+                className={`flex min-h-14 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl border px-2 text-[10px] font-medium ${
+                  activeTool
+                    ? "border-[#ffc400]/50 bg-[#ffc400]/15 text-[#ffc400]"
+                    : "border-white/10 bg-white/[0.04] text-slate-300"
+                }`}
+                onClick={() => onToolAction(tool.action)}
+              >
+                <Icon className="h-5 w-5" />
+                {tool.label}
+              </button>
+            );
+          })}
+        </div>
+        {selectedItem && (selectedItem.type === "video" || selectedItem.type === "audio") && (
+          <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2 text-xs text-slate-300">
+            <Volume2 className="h-4 w-4 shrink-0" />
+            <Slider
+              value={[clampNumber(selectedItem.volume, 0, 1)]}
+              min={0}
+              max={1}
+              step={0.01}
+              onValueChange={([volume]) => onUpdateItem(selectedItem.id, { volume })}
+              className="min-w-0 flex-1"
+            />
+            <span className="w-10 text-right text-[#ffc400]">{Math.round(selectedItem.volume * 100)}%</span>
+          </div>
+        )}
+        {selectedVisual && (
+          <div className="flex gap-2 overflow-x-auto border-t border-white/10 px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {[
+              { label: "Punch", action: "effect-punch" as const },
+              { label: "Vivid", action: "effect-vivid" as const },
+              { label: "Warm", action: "effect-warm" as const },
+              { label: "Cool", action: "effect-cool" as const },
+              { label: "Cinema", action: "effect-cinematic" as const },
+              { label: "Mono", action: "effect-mono" as const },
+              { label: "Dream", action: "effect-dream" as const },
+            ].map((effect) => {
+              const active = selectedVisual.effectPreset === effect.action.replace("effect-", "");
+              return (
+                <button
+                  key={effect.action}
+                  type="button"
+                  className={`min-h-10 shrink-0 rounded-full border px-4 text-xs font-medium ${
+                    active
+                      ? "border-[#ffc400]/50 bg-[#ffc400]/15 text-[#ffc400]"
+                      : "border-white/10 bg-white/[0.04] text-slate-300"
+                  }`}
+                  onClick={() => onToolAction(effect.action)}
+                >
+                  {effect.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {transitionPair && (
         <div className="fixed z-50 w-[320px] rounded-xl border border-white/10 bg-[#0b1018] p-4 text-white shadow-2xl" style={{ left: pickerLeft, top: pickerTop }}>

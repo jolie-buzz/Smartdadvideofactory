@@ -254,6 +254,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND);
   const [visibleTrackWidth, setVisibleTrackWidth] = useState(1080);
+  const [isMobileTimeline, setIsMobileTimeline] = useState(false);
   const [transitionPair, setTransitionPair] = useState<{ leftId: string; rightId: string; x: number; y: number } | null>(null);
   const [aiPrompt, setAiPrompt] = useState("smooth product swipe transition, fast social ad style");
   const [aiSeconds, setAiSeconds] = useState(4);
@@ -266,7 +267,10 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
     if (!scrollArea) return;
 
     const updateVisibleWidth = () => {
-      setVisibleTrackWidth(Math.max(320, scrollArea.clientWidth - LEFT_COLUMN_WIDTH));
+      const mobile = window.innerWidth < 768;
+      const leftWidth = mobile ? 56 : LEFT_COLUMN_WIDTH;
+      setIsMobileTimeline(mobile);
+      setVisibleTrackWidth(Math.max(320, scrollArea.clientWidth - leftWidth));
     };
     updateVisibleWidth();
 
@@ -278,7 +282,8 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const fitPixelsPerSecond = clampNumber(visibleTrackWidth / Math.max(1, timeline.project.duration), MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND);
   const timelineWidth = Math.max(visibleTrackWidth, timeline.project.duration * pixelsPerSecond);
   const effectivePixelsPerSecond = timelineWidth / Math.max(1, timeline.project.duration);
-  const playheadLeft = LEFT_COLUMN_WIDTH + clampNumber(currentTime * effectivePixelsPerSecond, 0, timelineWidth);
+  const leftColumnWidth = isMobileTimeline ? 56 : LEFT_COLUMN_WIDTH;
+  const playheadLeft = leftColumnWidth + clampNumber(currentTime * effectivePixelsPerSecond, 0, timelineWidth);
 
   useEffect(() => {
     setPixelsPerSecond((value) => Math.max(value, fitPixelsPerSecond));
@@ -456,7 +461,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
         </div>
       </div>
 
-      <div className="hidden items-center justify-between gap-2 border-b border-white/10 bg-[#0d131c] px-3 py-2 max-md:flex">
+      <div className="hidden items-center justify-between gap-2 border-b border-white/10 bg-[#0d131c] px-3 py-1.5 max-md:flex">
         <div className="text-[11px] font-medium text-slate-400">
           Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
         </div>
@@ -484,9 +489,9 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
         ref={scrollAreaRef}
         className="relative min-h-0 w-full max-w-full flex-1 overflow-auto [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin]"
       >
-        <div className="min-h-full" style={{ width: LEFT_COLUMN_WIDTH + timelineWidth }}>
-          <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `${LEFT_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-            <div className="sticky left-0 z-30 border-r border-white/10 bg-[#0a0f17] px-4 py-2 text-xs text-slate-500 max-md:w-[112px] max-md:px-3">0s</div>
+        <div className="min-h-full" style={{ width: leftColumnWidth + timelineWidth }}>
+          <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `${leftColumnWidth}px ${timelineWidth}px` }}>
+            <div className="sticky left-0 z-30 border-r border-white/10 bg-[#0a0f17] px-4 py-2 text-xs text-slate-500 max-md:grid max-md:place-items-center max-md:px-0">0s</div>
             <button
               type="button"
               className="relative h-9 cursor-crosshair overflow-hidden text-left max-md:h-11"
@@ -516,11 +521,11 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
               const TrackIcon = iconByType[track.type];
               const uploadType = track.type === "video" || track.type === "image" || track.type === "audio" ? track.type : null;
               return (
-            <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `${LEFT_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-              <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3 max-md:w-[112px] max-md:gap-2 max-md:px-3">
+            <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `${leftColumnWidth}px ${timelineWidth}px` }}>
+              <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3 max-md:justify-center max-md:px-0 max-md:py-1.5">
                 <button
                   type="button"
-                  className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition max-md:gap-2 ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition max-md:h-11 max-md:w-11 max-md:flex-none max-md:justify-center max-md:gap-0 ${
                     uploadType ? "cursor-pointer text-white hover:bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-[#ffc400]" : "cursor-default"
                   }`}
                   title={uploadType ? `Upload ${uploadType}` : track.name}
@@ -529,17 +534,17 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                   }}
                 >
                   <TrackIcon className="h-4 w-4 shrink-0 text-slate-300" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-white max-md:text-xs">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-white max-md:hidden">
                     {track.name.replace(" Track", "")}
                   </span>
-                  {uploadType && <Plus className="hidden h-3.5 w-3.5 shrink-0 text-[#ffc400] max-md:block" />}
+                  {uploadType && <Plus className="hidden h-3.5 w-3.5 shrink-0 text-[#ffc400]" />}
                 </button>
                 <Eye className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
                 <Lock className="h-3.5 w-3.5 text-slate-500 max-md:hidden" />
               </div>
               <div
                 data-track-lane={track.id}
-                className="relative min-h-[56px] overflow-hidden bg-[linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[length:8.33%_100%] px-2 py-2 max-md:min-h-[76px] max-md:py-3"
+                className="relative min-h-[56px] overflow-hidden bg-[linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[length:8.33%_100%] px-2 py-2 max-md:min-h-[52px] max-md:py-1.5"
                 style={{ backgroundSize: `${effectivePixelsPerSecond}px 100%` }}
                 onClick={(event) => {
                   if (event.target !== event.currentTarget) return;
@@ -640,9 +645,10 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     return startTime;
                   };
                   const startMoveDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-                    if (event.button !== 0) return;
+                    if (event.pointerType === "mouse" && event.button !== 0) return;
                     event.preventDefault();
                     event.stopPropagation();
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
                     if (event.metaKey || event.ctrlKey) {
                       onToggleItemSelection?.(item.id);
                       return;
@@ -661,14 +667,17 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     const handleUp = () => {
                       window.removeEventListener("pointermove", handleMove);
                       window.removeEventListener("pointerup", handleUp);
+                      window.removeEventListener("pointercancel", handleUp);
                       if (!didMove) onSeek(item.startTime + clampNumber(pointerOffset, 0, item.duration));
                     };
                     window.addEventListener("pointermove", handleMove);
                     window.addEventListener("pointerup", handleUp, { once: true });
+                    window.addEventListener("pointercancel", handleUp, { once: true });
                   };
                   const startTrimDrag = (edge: "start" | "end", event: ReactPointerEvent<HTMLSpanElement>) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
                     onSelectItem(item.id);
                     const handleMove = (moveEvent: PointerEvent) => {
                       const pointerTime = timelineRectToSeconds(moveEvent.clientX);
@@ -695,9 +704,11 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     const handleUp = () => {
                       window.removeEventListener("pointermove", handleMove);
                       window.removeEventListener("pointerup", handleUp);
+                      window.removeEventListener("pointercancel", handleUp);
                     };
                     window.addEventListener("pointermove", handleMove);
                     window.addEventListener("pointerup", handleUp, { once: true });
+                    window.addEventListener("pointercancel", handleUp, { once: true });
                   };
                   return (
                     <button
@@ -716,7 +727,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                         onSeek(item.startTime + clickedOffset);
                         onUpdateItem(item.id, {});
                       }}
-                      className={`absolute top-2 h-10 min-w-[44px] overflow-hidden rounded-md border bg-gradient-to-r px-3 text-left text-xs text-white shadow-lg transition max-md:h-14 max-md:rounded-lg max-md:px-4 max-md:text-sm ${colorByType[item.type]} ${
+                      className={`absolute top-2 h-10 min-w-[44px] touch-none select-none overflow-hidden rounded-md border bg-gradient-to-r px-3 text-left text-xs text-white shadow-lg transition max-md:top-1.5 max-md:h-10 max-md:rounded-md max-md:px-3 max-md:text-xs ${colorByType[item.type]} ${
                         selected ? "ring-2 ring-[#ffc400]" : "opacity-90 hover:opacity-100"
                       } cursor-grab active:cursor-grabbing`}
                       style={{ left, width }}
@@ -735,12 +746,12 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                       {selected && (
                         <>
                           <span
-                            className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
+                            className="absolute inset-y-0 left-0 z-10 w-2 touch-none cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
                             title="Drag to extend or trim start"
                             onPointerDown={(event) => startTrimDrag("start", event)}
                           />
                           <span
-                            className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
+                            className="absolute inset-y-0 right-0 z-10 w-2 touch-none cursor-ew-resize bg-white/40 hover:bg-[#ffc400] max-md:w-5"
                             title="Drag to extend or trim end"
                             onPointerDown={(event) => startTrimDrag("end", event)}
                           />

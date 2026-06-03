@@ -380,13 +380,21 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     if (!permissions.includes("edit-project")) return;
     if (Object.keys(patch).length === 0) return;
     recordHistory();
-    setTimeline((current) => ({
-      ...current,
-      tracks: current.tracks.map((track) => ({
-        ...track,
-        items: track.items.map((item) => item.id === id ? { ...item, ...patch } : item),
-      })),
-    }));
+    setTimeline((current) => {
+      const shouldCloseVideoGap = current.tracks.some((track) => (
+        track.id === "video-main"
+        && track.items.some((item) => item.id === id && item.type === "video")
+        && ("startTime" in patch || "duration" in patch || "trimStart" in patch || "trimEnd" in patch)
+      ));
+      const nextTimeline = {
+        ...current,
+        tracks: current.tracks.map((track) => ({
+          ...track,
+          items: track.items.map((item) => item.id === id ? { ...item, ...patch } : item),
+        })),
+      };
+      return shouldCloseVideoGap ? sequenceMainVideoTrack(nextTimeline) : nextTimeline;
+    });
   };
 
   const moveTimelineItem = (id: string, startTime: number, ripple = false) => {
@@ -554,13 +562,19 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
 
     if (tool === "delete") {
       recordHistory();
-      setTimeline((current) => ({
-        ...current,
-        tracks: current.tracks.map((track) => ({
-          ...track,
-          items: track.items.filter((item) => item.id !== selectedItem.id),
-        })),
-      }));
+      setTimeline((current) => {
+        const isMainVideoItem = current.tracks.some((track) => (
+          track.id === "video-main" && track.items.some((item) => item.id === selectedItem.id && item.type === "video")
+        ));
+        const nextTimeline = {
+          ...current,
+          tracks: current.tracks.map((track) => ({
+            ...track,
+            items: track.items.filter((item) => item.id !== selectedItem.id),
+          })),
+        };
+        return isMainVideoItem ? sequenceMainVideoTrack(nextTimeline) : nextTimeline;
+      });
       setSelectedItemId(null);
       toast({ title: "Clip deleted", description: `${selectedItem.name} was removed from the timeline.` });
       return;
@@ -574,12 +588,18 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         startTime: Math.min(timeline.project.duration - selectedItem.duration, selectedItem.startTime + 0.6),
       };
       recordHistory();
-      setTimeline((current) => ({
-        ...current,
-        tracks: current.tracks.map((track) => (
-          track.id === selectedItem.trackId ? { ...track, items: [...track.items, clone] } : track
-        )),
-      }));
+      setTimeline((current) => {
+        const isMainVideoItem = current.tracks.some((track) => (
+          track.id === "video-main" && track.items.some((item) => item.id === selectedItem.id && item.type === "video")
+        ));
+        const nextTimeline = {
+          ...current,
+          tracks: current.tracks.map((track) => (
+            track.id === selectedItem.trackId ? { ...track, items: [...track.items, clone] } : track
+          )),
+        };
+        return isMainVideoItem ? sequenceMainVideoTrack(nextTimeline) : nextTimeline;
+      });
       setSelectedItemId(clone.id);
       seekTo(clone.startTime);
       toast({ title: "Clip duplicated", description: `${selectedItem.name} was copied for another beat.` });
@@ -608,13 +628,19 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       };
 
       recordHistory();
-      setTimeline((current) => ({
-        ...current,
-        tracks: current.tracks.map((track) => ({
-          ...track,
-          items: track.items.flatMap((item) => item.id === selectedItem.id ? [{ ...item, duration: firstDuration, trimEnd: item.trimStart + firstDuration }, clone] : [item]),
-        })),
-      }));
+      setTimeline((current) => {
+        const isMainVideoItem = current.tracks.some((track) => (
+          track.id === "video-main" && track.items.some((item) => item.id === selectedItem.id && item.type === "video")
+        ));
+        const nextTimeline = {
+          ...current,
+          tracks: current.tracks.map((track) => ({
+            ...track,
+            items: track.items.flatMap((item) => item.id === selectedItem.id ? [{ ...item, duration: firstDuration, trimEnd: item.trimStart + firstDuration }, clone] : [item]),
+          })),
+        };
+        return isMainVideoItem ? sequenceMainVideoTrack(nextTimeline) : nextTimeline;
+      });
       setSelectedItemId(clone.id);
       seekTo(clone.startTime);
       toast({ title: "Clip split", description: `${selectedItem.name} was split into two editable clips.` });
@@ -2152,7 +2178,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               )}
             </section>
 
-            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[34dvh] max-md:p-0">
+            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[26dvh] max-md:p-0">
               <TimelinePanel
                 timeline={timeline}
                 currentTime={currentTime}

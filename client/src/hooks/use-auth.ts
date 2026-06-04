@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest, getQueryFn } from "@/lib/queryClient";
+import { clearCachedApiQueries, queryClient, apiRequest, getQueryFn } from "@/lib/queryClient";
 import type { User } from "@shared/schema";
 
 export function useAuth() {
@@ -16,6 +16,7 @@ export function useAuth() {
       return await res.json();
     },
     onSuccess: () => {
+      clearCachedApiQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
   });
@@ -26,6 +27,7 @@ export function useAuth() {
       return await res.json();
     },
     onSuccess: () => {
+      clearCachedApiQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
   });
@@ -35,6 +37,7 @@ export function useAuth() {
       await apiRequest("POST", "/api/auth/logout");
     },
     onSuccess: () => {
+      clearCachedApiQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
   });

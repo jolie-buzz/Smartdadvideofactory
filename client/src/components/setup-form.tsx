@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { invalidateAssetsCache, queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -455,7 +455,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || `Server error (${res.status})`);
         }
-        queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+        invalidateAssetsCache();
         toast({ title: "Setup updated", description: "Your setup has been updated successfully." });
         onCancelEdit?.();
         onComplete();
@@ -570,7 +570,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       }
 
       setUploadStep("done");
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      invalidateAssetsCache();
       toast({ title: "Setup saved", description: "Your setup has been saved successfully." });
       setName("");
       setPersonaPrompt("");
@@ -647,7 +647,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Failed to update ${type}`);
       }
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      invalidateAssetsCache();
       const label = type === "photo" ? "Photo" : type === "video" ? "Video" : "Music";
       toast({ title: `${label} replaced`, description: `Your ${type} has been replaced successfully.` });
     } catch (err: any) {

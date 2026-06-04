@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bell,
@@ -148,6 +148,15 @@ const railItems: Array<{ id: StudioRailId; label: string; icon: LucideIcon }> = 
 type BuzzlyStudioProps = {
   initialGoal?: StudioGoal | null;
   onChangeGoal?: () => void;
+};
+
+const MOBILE_TIMELINE_HEIGHT_KEY = "buzzly.mobileTimelineHeightDvh";
+const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const getInitialMobileTimelineHeight = () => {
+  if (typeof window === "undefined") return 34;
+  const stored = Number(window.localStorage.getItem(MOBILE_TIMELINE_HEIGHT_KEY));
+  return Number.isFinite(stored) ? clampNumber(stored, 24, 52) : 34;
 };
 
 const defaultVisualFrame = (type: BuzzlyTimelineItem["type"]) => {
@@ -329,6 +338,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [showJson, setShowJson] = useState(false);
   const [activeRail, setActiveRail] = useState<StudioRailId>(() => initialGoal ? "setup" : "studio");
   const [mobileTool, setMobileTool] = useState<MobileToolId>(null);
+  const [mobileTimelineHeight, setMobileTimelineHeight] = useState(getInitialMobileTimelineHeight);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [setupMode, setSetupMode] = useState<"guided" | "form">("form");
@@ -363,11 +373,37 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     () => timeline.tracks.flatMap((track) => track.items).filter((item) => item.type === "video" || item.type === "image").length,
     [timeline.tracks],
   );
+  const mobilePreviewHeight = clampNumber(82 - mobileTimelineHeight, 30, 58);
   const permissions = useMemo(() => getActivePermissions(timeline), [timeline]);
   const activeMember = useMemo(
     () => timeline.userSystem.members.find((member) => member.id === timeline.userSystem.currentUserId) || timeline.userSystem.members[0],
     [timeline.userSystem],
   );
+
+  useEffect(() => {
+    window.localStorage.setItem(MOBILE_TIMELINE_HEIGHT_KEY, String(Math.round(mobileTimelineHeight)));
+  }, [mobileTimelineHeight]);
+
+  const startMobileLayoutDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const startY = event.clientY;
+    const startHeight = mobileTimelineHeight;
+    const handleMove = (moveEvent: PointerEvent) => {
+      const viewportHeight = Math.max(1, window.innerHeight);
+      const deltaDvh = ((startY - moveEvent.clientY) / viewportHeight) * 100;
+      setMobileTimelineHeight(clampNumber(startHeight + deltaDvh, 24, 52));
+    };
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp, { once: true });
+    window.addEventListener("pointercancel", handleUp, { once: true });
+  };
 
   const selectTimelineItem = (id: string) => {
     setSelectedItemId(id);
@@ -2313,7 +2349,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                     Export
                   </Button>
                 </div>
-                <div className="min-h-0 min-w-0 flex-1 max-md:h-[48dvh] max-md:flex-none max-md:px-3 max-md:py-3">
+                <div
+                  className="min-h-0 min-w-0 flex-1 max-md:h-[var(--mobile-preview-height)] max-md:flex-none max-md:px-3 max-md:py-3"
+                  style={{ "--mobile-preview-height": `min(${mobilePreviewHeight}dvh, ${mobilePreviewHeight}vh)` } as CSSProperties}
+                >
                   <PreviewPanel
                     timeline={timeline}
                     currentTime={currentTime}
@@ -2353,7 +2392,19 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               )}
             </section>
 
-            <section className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[34dvh] max-md:p-0">
+            <button
+              type="button"
+              className="hidden h-6 touch-none select-none items-center justify-center border-y border-white/10 bg-[#090d14] text-[10px] uppercase tracking-wide text-slate-500 max-md:flex"
+              onPointerDown={startMobileLayoutDrag}
+              aria-label="Resize preview and timeline"
+            >
+              <span className="h-1 w-14 rounded-full bg-slate-600" />
+            </button>
+
+            <section
+              className="min-h-0 min-w-0 overflow-hidden p-4 max-md:h-[var(--mobile-timeline-height)] max-md:p-0"
+              style={{ "--mobile-timeline-height": `min(${mobileTimelineHeight}dvh, ${mobileTimelineHeight}vh)` } as CSSProperties}
+            >
               <TimelinePanel
                 timeline={timeline}
                 currentTime={currentTime}

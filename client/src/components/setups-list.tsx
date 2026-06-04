@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { invalidateAssetsCache, queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      invalidateAssetsCache();
       toast({ title: "Duplicated", description: "Setup has been copied. You can now edit the copy." });
     },
     onError: (err: Error) => {
@@ -65,7 +65,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
       await apiRequest("DELETE", `/api/assets/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      invalidateAssetsCache();
       toast({ title: "Deleted", description: "Setup has been removed." });
     },
     onError: (err: Error) => {

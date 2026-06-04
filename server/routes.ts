@@ -406,14 +406,15 @@ export async function registerRoutes(
   });
 
   app.get("/api/assets/:id/media/:kind", requireAuth, async (req, res) => {
+    const assetId = parseInt(String(req.params.id));
+    const kind = String(req.params.kind);
     try {
-      const asset = await storage.getAsset(parseInt(req.params.id));
+      const asset = await storage.getAsset(assetId);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
       if (req.user!.role !== "admin" && asset.userId !== req.user!.id) {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const kind = req.params.kind;
       const key =
         kind === "photo" ? asset.photoKey :
         kind === "video" ? asset.videoKey :
@@ -430,11 +431,12 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Media not found" });
       }
 
-      await pipeR2Media(res, key, req.headers.range, { assetId: asset.id, kind });
+      const range = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+      await pipeR2Media(res, key, range, { assetId: asset.id, kind });
     } catch (err: any) {
       console.error("[media] asset stream failed", {
-        assetId: req.params.id,
-        kind: req.params.kind,
+        assetId,
+        kind,
         userId: req.user?.id,
         role: req.user?.role,
         r2: getR2ConfigStatus(),

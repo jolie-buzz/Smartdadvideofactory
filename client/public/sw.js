@@ -1,4 +1,4 @@
-const CACHE_VERSION = "buzzly-pwa-v1";
+const CACHE_VERSION = "buzzly-pwa-v2";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -33,6 +33,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -57,6 +63,24 @@ self.addEventListener("fetch", (event) => {
         .catch(async () => {
           const cachedHome = await caches.match("/");
           return cachedHome || caches.match("/offline.html");
+        })
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith("/assets/") || url.pathname === "/sw.js") {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          const copy = networkResponse.clone();
+          if (networkResponse.ok) {
+            caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          const cachedResponse = await caches.match(request);
+          return cachedResponse || Response.error();
         })
     );
     return;

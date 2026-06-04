@@ -21,7 +21,7 @@ interface SetupsListProps {
   onOpenStudio?: (asset: Asset, media?: AssetMediaUrls) => void;
 }
 
-function SetupThumbnail({ asset, media }: { asset: Asset; media?: AssetMediaUrls }) {
+function SetupThumbnail({ asset, media, priority = false }: { asset: Asset; media?: AssetMediaUrls; priority?: boolean }) {
   const [failed, setFailed] = useState(false);
   const photoUrl = asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null;
   const videoUrl = media?.videoUrl || (asset.videoKey ? `/api/assets/${asset.id}/media/video` : null);
@@ -32,7 +32,8 @@ function SetupThumbnail({ asset, media }: { asset: Asset; media?: AssetMediaUrls
         src={photoUrl}
         alt={asset.name}
         className="h-full w-full object-cover"
-        loading="lazy"
+        loading={priority ? "eager" : "lazy"}
+        fetchPriority={priority ? "high" : "auto"}
         onError={(event) => {
           console.warn("[thumbnail] photo load failed", {
             assetId: asset.id,
@@ -168,7 +169,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         <Badge variant="secondary">{assetsQuery.data.length} setup{assetsQuery.data.length !== 1 ? "s" : ""}</Badge>
       </div>
 
-      {assetsQuery.data.map((asset) => {
+      {assetsQuery.data.map((asset, index) => {
         const media = mediaUrlsQuery.data?.[asset.id];
         return (
         <Card key={asset.id}>
@@ -181,7 +182,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                 disabled={!onOpenStudio}
                 title="Open in Studio"
               >
-                <SetupThumbnail asset={asset} media={media} />
+                <SetupThumbnail asset={asset} media={media} priority={index < 6} />
                 {asset.videoKey && (
                   <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 p-1 text-white">
                     <Film className="h-3.5 w-3.5" />

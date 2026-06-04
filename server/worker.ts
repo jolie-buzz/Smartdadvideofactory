@@ -51,6 +51,17 @@ const transcriptionClient = process.env.OPENAI_API_KEY
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
+class TtsProviderError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(message);
+    this.name = "TtsProviderError";
+  }
+}
+
 function getPublicMusicInput(musicKey: string): string | null {
   if (!musicKey.startsWith("public:")) return null;
   const publicPath = musicKey.slice("public:".length);
@@ -142,11 +153,30 @@ async function generateVoice(scriptText: string, voiceId: string, elevenlabsMode
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`ElevenLabs TTS failed (${response.status}): ${errText}`);
+    throw new TtsProviderError(`ElevenLabs TTS failed (${response.status}): ${errText}`, response.status, errText);
   }
 
   const arrayBuffer = await response.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+async function createSilentAudioBuffer(workDir: string): Promise<Buffer> {
+  const silentPath = join(workDir, "voice_fallback_silent.mp3");
+  await runFfmpeg([
+    "-f", "lavfi",
+    "-i", "anullsrc=r=44100:cl=mono",
+    "-t", "1",
+    "-q:a", "9",
+    "-acodec", "libmp3lame",
+    "-y",
+    silentPath,
+  ], 60_000);
+  return readFile(silentPath);
+}
+
+function shouldFallbackFromTtsError(error: unknown): boolean {
+  if (!(error instanceof TtsProviderError)) return false;
+  return error.status === 401 && error.body.includes("detected_unusual_activity");
 }
 
 function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string> {
@@ -180,7 +210,7 @@ function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string>
  * No local video download needed — FFmpeg reads directly from the presigned URL.
  */
 async function combineAllInOne(
-  voicePath: string,
+  voicePath: string | null,
   videoUrl: string,
   musicUrl: string | null,
   outputPath: string,
@@ -198,8 +228,37 @@ async function combineAllInOne(
   const args: string[] = [
     "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
     "-i", videoUrl,
-    "-i", voicePath,
   ];
+
+  if (!voicePath) {
+    if (musicUrl) {
+      args.push("-i", musicUrl);
+      args.push(
+        "-filter_complex",
+        `[1:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop]`,
+        "-map", "0:v:0",
+        "-map", "[musicloop]",
+        "-shortest",
+      );
+    } else {
+      args.push(
+        "-map", "0:v:0",
+        "-an",
+      );
+    }
+    args.push(
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-movflags", "+faststart",
+      "-y",
+      outputPath,
+    );
+    await runFfmpeg(args);
+    return;
+  }
+
+  args.push("-i", voicePath);
 
   if (musicUrl) {
     args.push("-i", musicUrl);
@@ -541,13 +600,24 @@ async function processJob(jobId: number): Promise<void> {
     await storage.updateJob(jobId, { status: "generating_audio" });
     await storage.appendJobLog(jobId, `Generating voice (ElevenLabs) + fetching R2 URLs in parallel...`);
 
-    const [audioRawBuffer, videoUrl, musicUrl] = await Promise.all([
-      generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance),
-      getSignedDownloadUrl(asset.videoKey),
-      getMusicInput(asset.musicKey),
-    ]);
+    const videoUrlPromise = getSignedDownloadUrl(asset.videoKey);
+    const musicUrlPromise = getMusicInput(asset.musicKey);
+    let shouldMixVoice = true;
+    let audioRawBuffer: Buffer;
+    try {
+      audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance);
+    } catch (err) {
+      if (!shouldFallbackFromTtsError(err)) throw err;
+      shouldMixVoice = false;
+      await storage.appendJobLog(jobId, "ElevenLabs free-tier access is blocked for unusual activity. Continuing without AI voiceover for this render.");
+      audioRawBuffer = await createSilentAudioBuffer(workDir);
+    }
 
-    await storage.appendJobLog(jobId, `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`);
+    const [videoUrl, musicUrl] = await Promise.all([videoUrlPromise, musicUrlPromise]);
+
+    await storage.appendJobLog(jobId, shouldMixVoice
+      ? `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`
+      : `Voice fallback ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB silent placeholder). Starting FFmpeg + R2 upload in parallel...`);
 
     const voiceRawPath = join(workDir, "voice_raw.mp3");
     await writeFile(voiceRawPath, audioRawBuffer);
@@ -562,7 +632,7 @@ async function processJob(jobId: number): Promise<void> {
 
     await Promise.all([
       uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
-      combineAllInOne(voiceRawPath, videoUrl, musicUrl, finalPath, {
+      combineAllInOne(shouldMixVoice ? voiceRawPath : null, videoUrl, musicUrl, finalPath, {
         thresholdDb: asset.thresholdDb,
         removeSilencesLongerThan: asset.removeSilencesLongerThan,
         ignoreDetectionsShorterThan: asset.ignoreDetectionsShorterThan,

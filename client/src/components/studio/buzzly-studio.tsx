@@ -420,6 +420,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   };
 
   const startMobileLayoutTouchDrag = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (event.touches.length !== 1) return;
     const touch = event.touches[0];
     if (!touch) return;
     event.preventDefault();
@@ -2067,7 +2068,12 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[#070a0f] text-slate-100 max-md:h-[100dvh]">
+    <div
+      className="h-screen overflow-hidden bg-[#070a0f] text-slate-100 max-md:h-[100dvh]"
+      onWheelCapture={(event) => {
+        if (event.ctrlKey) event.preventDefault();
+      }}
+    >
       <div className="flex h-screen flex-col max-md:h-[100dvh] max-md:pb-[calc(env(safe-area-inset-bottom)+72px)]">
         <header className="hidden min-h-16 grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-white/10 bg-[#090d14]/95 px-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur md:grid">
           <div className="flex items-center gap-4">

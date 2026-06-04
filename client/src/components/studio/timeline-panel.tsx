@@ -321,12 +321,15 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const getTouchCenterX = (touches: ReactTouchEvent<HTMLDivElement>["touches"]) => (touches[0].clientX + touches[1].clientX) / 2;
   const handleTimelineTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 2) return;
+    event.preventDefault();
+    event.stopPropagation();
     pinchRef.current = { distance: getTouchDistance(event.touches), pixelsPerSecond };
   };
   const handleTimelineTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
     const pinch = pinchRef.current;
     if (!pinch || event.touches.length !== 2) return;
     event.preventDefault();
+    event.stopPropagation();
     zoomAtClientX(getTouchCenterX(event.touches), pinch.pixelsPerSecond * (getTouchDistance(event.touches) / Math.max(1, pinch.distance)));
   };
   const handleTimelineTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
@@ -546,10 +549,11 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
 
       <div
         ref={scrollAreaRef}
-        className="relative min-h-0 w-full max-w-full flex-1 overflow-auto [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin]"
+        className="relative min-h-0 w-full max-w-full flex-1 overflow-auto overscroll-contain [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin] [touch-action:pan-x]"
         onWheel={(event) => {
           if (!event.ctrlKey && Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
           event.preventDefault();
+          event.stopPropagation();
           const direction = event.deltaY > 0 || event.deltaX > 0 ? -1 : 1;
           const factor = direction > 0 ? 1.08 : 0.92;
           zoomAtClientX(event.clientX, pixelsPerSecond * factor);

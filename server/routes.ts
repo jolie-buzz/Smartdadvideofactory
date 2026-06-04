@@ -14,6 +14,7 @@ import fs from "fs";
 import OpenAI from "openai";
 import { spawn } from "child_process";
 import ffmpegStatic from "ffmpeg-static";
+import { sanitizeNarrationScript } from "@shared/script-cleaner";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -715,7 +716,7 @@ export async function registerRoutes(
       }
 
       res.json({
-        script: parsed.script || "",
+        script: sanitizeNarrationScript(parsed.script || ""),
         captions: Array.isArray(parsed.captions) ? parsed.captions : [],
         hashtags: parsed.hashtags || "",
       });

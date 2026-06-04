@@ -7,6 +7,7 @@ import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import OpenAI from "openai";
+import { sanitizeNarrationScript } from "@shared/script-cleaner";
 
 function createLlmClient(): OpenAI | null {
   if (process.env.DEEPSEEK_API_KEY) {
@@ -130,7 +131,7 @@ Rules:
     ],
   });
 
-  return response.choices[0]?.message?.content?.trim() || "";
+  return sanitizeNarrationScript(response.choices[0]?.message?.content?.trim() || "");
 }
 
 async function generateVoice(scriptText: string, voiceId: string, elevenlabsModel: string, useEnhance: boolean): Promise<Buffer> {
@@ -590,7 +591,8 @@ async function processJob(jobId: number): Promise<void> {
       await storage.appendJobLog(jobId, "Applying excluded words filter");
     }
 
-    const scriptText = await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords);
+    const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords));
+    if (!scriptText) throw new Error("Generated script was empty after removing non-narration sections");
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);
 

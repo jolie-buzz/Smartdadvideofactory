@@ -35,6 +35,7 @@ import {
   Hash,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { sanitizeNarrationScript } from "@shared/script-cleaner";
 
 type JobWithAsset = {
   id: number;
@@ -527,7 +528,7 @@ export function JobsList() {
                         className="bg-muted rounded-md p-3 text-sm whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto"
                         data-testid={`text-script-${job.id}`}
                       >
-                        {job.scriptText}
+                        {sanitizeNarrationScript(job.scriptText)}
                       </div>
                     </div>
                   )}
@@ -621,7 +622,7 @@ export function JobsList() {
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const blob = new Blob([job.scriptText!], { type: "text/plain" });
+                          const blob = new Blob([sanitizeNarrationScript(job.scriptText)], { type: "text/plain" });
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement("a");
                           a.href = url;

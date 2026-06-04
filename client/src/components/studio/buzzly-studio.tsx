@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bell,
@@ -384,25 +384,48 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     window.localStorage.setItem(MOBILE_TIMELINE_HEIGHT_KEY, String(Math.round(mobileTimelineHeight)));
   }, [mobileTimelineHeight]);
 
-  const startMobileLayoutDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    const startY = event.clientY;
+  const beginMobileLayoutDrag = (startY: number) => {
     const startHeight = mobileTimelineHeight;
-    const handleMove = (moveEvent: PointerEvent) => {
+    const applyClientY = (clientY: number) => {
       const viewportHeight = Math.max(1, window.innerHeight);
-      const deltaDvh = ((startY - moveEvent.clientY) / viewportHeight) * 100;
+      const deltaDvh = ((startY - clientY) / viewportHeight) * 100;
       setMobileTimelineHeight(clampNumber(startHeight + deltaDvh, 24, 52));
+    };
+    const handleMove = (moveEvent: PointerEvent) => applyClientY(moveEvent.clientY);
+    const handleTouchMove = (moveEvent: TouchEvent) => {
+      moveEvent.preventDefault();
+      const touch = moveEvent.touches[0];
+      if (touch) applyClientY(touch.clientY);
     };
     const handleUp = () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("pointercancel", handleUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleUp);
+      window.removeEventListener("touchcancel", handleUp);
     };
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp, { once: true });
     window.addEventListener("pointercancel", handleUp, { once: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleUp, { once: true });
+    window.addEventListener("touchcancel", handleUp, { once: true });
+  };
+
+  const startMobileLayoutDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    beginMobileLayoutDrag(event.clientY);
+  };
+
+  const startMobileLayoutTouchDrag = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    event.preventDefault();
+    event.stopPropagation();
+    beginMobileLayoutDrag(touch.clientY);
   };
 
   const selectTimelineItem = (id: string) => {
@@ -632,6 +655,33 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
 
   const handleTimelineToolAction = (tool: TimelineToolAction) => {
     if (!requirePermission("edit-project")) return;
+    if (tool === "cut-dead-air") {
+      const videoTrack = timeline.tracks.find((track) => track.id === "video-main");
+      const sortedVideos = [...(videoTrack?.items || [])]
+        .filter((item) => item.type === "video")
+        .sort((a, b) => a.startTime - b.startTime);
+      const gapCount = sortedVideos.reduce((count, item, index) => {
+        if (index === 0) return count + (item.startTime > 0.05 ? 1 : 0);
+        const previous = sortedVideos[index - 1];
+        return count + (item.startTime - (previous.startTime + previous.duration) > 0.05 ? 1 : 0);
+      }, 0);
+
+      if (!sortedVideos.length) {
+        toast({ title: "No video clips", description: "Upload or select video clips before cutting dead air." });
+        return;
+      }
+      if (gapCount === 0) {
+        toast({ title: "No dead air found", description: "Your main video track is already continuous." });
+        return;
+      }
+
+      recordHistory();
+      setTimeline((current) => sequenceMainVideoTrack(current));
+      seekTo(0);
+      toast({ title: "Dead air removed", description: `${gapCount} blank gap${gapCount === 1 ? "" : "s"} closed in the video track.` });
+      return;
+    }
+
     if (!selectedItem) {
       toast({ title: "Select a clip first", description: "Choose a timeline clip before using this tool." });
       return;
@@ -2123,7 +2173,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             <div />
           </aside>
 
-          <main className={`grid min-h-0 bg-[radial-gradient(circle_at_top_left,rgba(255,196,0,0.08),transparent_30%),#070a0f] max-md:h-full ${
+          <main className={`grid min-h-0 bg-[radial-gradient(circle_at_top_left,rgba(255,196,0,0.08),transparent_30%),#070a0f] max-md:flex max-md:h-full max-md:flex-col ${
             isProductionRail ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_320px]"
           }`}>
             {isProductionRail ? (
@@ -2161,7 +2211,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
               </section>
             ) : (
               <>
-            <section className={`grid min-h-0 min-w-0 gap-4 overflow-hidden p-4 pb-0 max-[1180px]:[&_.assistant-pane]:hidden max-[920px]:grid-cols-1 max-md:block max-md:overflow-y-auto max-md:p-0 ${
+            <section className={`grid min-h-0 min-w-0 gap-4 overflow-hidden p-4 pb-0 max-[1180px]:[&_.assistant-pane]:hidden max-[920px]:grid-cols-1 max-md:block max-md:flex-none max-md:overflow-hidden max-md:p-0 ${
               showStudioSidePanels
                 ? leftPanelOpen
                   ? "grid-cols-[360px_minmax(520px,1fr)_360px] max-[1180px]:grid-cols-[320px_minmax(480px,1fr)]"
@@ -2316,10 +2366,28 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                     </Button>
                   </div>
                 </div>
-                <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-white/10 bg-[#090d14]/95 px-3 py-2 pt-[calc(env(safe-area-inset-top)+8px)] backdrop-blur md:hidden">
+                <div className="sticky top-0 z-20 flex items-center gap-2 overflow-x-auto border-b border-white/10 bg-[#090d14]/95 px-3 py-2 pt-[calc(env(safe-area-inset-top)+8px)] backdrop-blur [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
                   <Button
                     variant="outline"
-                    className="h-11 min-w-0 flex-1 border-white/10 bg-white/[0.04] px-2 text-xs text-white hover:bg-white/10"
+                    className="h-11 min-w-[52px] border-white/10 bg-white/[0.04] px-2 text-xs text-white hover:bg-white/10 disabled:text-slate-700"
+                    onClick={undoTimeline}
+                    disabled={undoStack.length === 0}
+                    title="Undo"
+                  >
+                    <Undo2 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-[52px] border-white/10 bg-white/[0.04] px-2 text-xs text-white hover:bg-white/10 disabled:text-slate-700"
+                    onClick={redoTimeline}
+                    disabled={redoStack.length === 0}
+                    title="Redo"
+                  >
+                    <Undo2 className="h-4 w-4 rotate-180" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-[92px] border-white/10 bg-white/[0.04] px-2 text-xs text-white hover:bg-white/10"
                     onClick={() => {
                       if (!isPlaying) window.dispatchEvent(new Event("buzzly-prime-audio"));
                       setIsPlaying((value) => !value);
@@ -2330,7 +2398,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-11 min-w-0 flex-1 border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
+                    className="h-11 min-w-[96px] border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
                     onClick={shuffleSelectedShots}
                   >
                     <Shuffle className="mr-1 h-4 w-4" />
@@ -2338,14 +2406,21 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-11 min-w-0 flex-1 border-emerald-400/30 bg-emerald-400/10 px-2 text-xs text-emerald-200 hover:bg-emerald-400/20"
+                    className="h-11 min-w-[92px] border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
+                    onClick={() => handleTimelineToolAction("cut-dead-air")}
+                  >
+                    Cut Air
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 min-w-[82px] border-emerald-400/30 bg-emerald-400/10 px-2 text-xs text-emerald-200 hover:bg-emerald-400/20"
                     onClick={setupBuilderMode ? finishSetupVideoBuilder : () => navigateRail("setup")}
                     disabled={setupBuilderMode && setupBuilderMediaCount === 0}
                   >
                     <CheckCircle2 className="mr-1 h-4 w-4" />
                     Done
                   </Button>
-                  <Button className="h-11 min-w-0 flex-1 bg-[#ffc400] px-2 text-xs font-semibold text-black hover:bg-[#ffd84a]" onClick={handleExport}>
+                  <Button className="h-11 min-w-[84px] bg-[#ffc400] px-2 text-xs font-semibold text-black hover:bg-[#ffd84a]" onClick={handleExport}>
                     Export
                   </Button>
                 </div>
@@ -2394,8 +2469,9 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
 
             <button
               type="button"
-              className="hidden h-6 touch-none select-none items-center justify-center border-y border-white/10 bg-[#090d14] text-[10px] uppercase tracking-wide text-slate-500 max-md:flex"
+              className="hidden h-9 touch-none select-none items-center justify-center border-y border-white/10 bg-[#090d14] text-[10px] uppercase tracking-wide text-slate-500 max-md:flex"
               onPointerDown={startMobileLayoutDrag}
+              onTouchStart={startMobileLayoutTouchDrag}
               aria-label="Resize preview and timeline"
             >
               <span className="h-1 w-14 rounded-full bg-slate-600" />

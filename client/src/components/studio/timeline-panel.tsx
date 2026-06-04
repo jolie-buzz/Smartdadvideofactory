@@ -41,6 +41,7 @@ export type TimelineToolAction =
   | "fade"
   | "speed"
   | "enhance"
+  | "cut-dead-air"
   | "effect-punch"
   | "effect-vivid"
   | "effect-warm"
@@ -313,6 +314,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
             { label: "Fit", icon: Maximize2, action: "fit" as const },
             { label: "Fade", icon: Sparkles, action: "fade" as const },
             { label: selectedItem?.playbackRate && selectedItem.playbackRate !== 1 ? `Speed ${selectedItem.playbackRate}x` : "Speed", icon: Zap, action: "speed" as const },
+            { label: "Cut Dead Air", icon: Scissors, action: "cut-dead-air" as const },
             { label: "Enhance", icon: WandSparkles, action: "enhance" as const },
             { label: "Reset", icon: RotateCcw, action: "reset" as const },
           ].map((tool) => {
@@ -803,6 +805,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
             { label: "Zoom Out", icon: ZoomOut, action: "zoom-out-motion" as const },
             { label: "Fade", icon: Sparkles, action: "fade" as const },
             { label: selectedItem?.playbackRate && selectedItem.playbackRate !== 1 ? `${selectedItem.playbackRate}x` : "Speed", icon: Zap, action: "speed" as const },
+            { label: "Cut Air", icon: Scissors, action: "cut-dead-air" as const },
             { label: "Enhance", icon: WandSparkles, action: "enhance" as const },
             { label: "Reset", icon: RotateCcw, action: "reset" as const },
           ].map((tool) => {

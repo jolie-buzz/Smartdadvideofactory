@@ -329,6 +329,23 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/assets/media-urls", requireAuth, async (req, res) => {
+    try {
+      const assetsList = await storage.getAssets(req.user!.role === "admin" ? undefined : req.user!.id);
+      const entries = await Promise.all(assetsList.map(async (asset) => {
+        const [photoUrl, videoUrl, musicUrl] = await Promise.all([
+          asset.photoKey ? getSignedDownloadUrl(asset.photoKey).catch(() => null) : Promise.resolve(null),
+          asset.videoKey ? getSignedDownloadUrl(asset.videoKey).catch(() => null) : Promise.resolve(null),
+          asset.musicKey ? getSignedDownloadUrl(asset.musicKey).catch(() => null) : Promise.resolve(null),
+        ]);
+        return [asset.id, { photoUrl, videoUrl, musicUrl }];
+      }));
+      res.json(Object.fromEntries(entries));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/assets/:id", requireAuth, async (req, res) => {
     try {
       const asset = await storage.getAsset(parseInt(req.params.id));

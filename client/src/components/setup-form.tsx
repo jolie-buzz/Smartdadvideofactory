@@ -40,6 +40,12 @@ interface PendingShot {
   filename: string;
 }
 
+type AssetMediaUrls = {
+  photoUrl: string | null;
+  videoUrl: string | null;
+  musicUrl: string | null;
+};
+
 const MAX_FILE_SIZE_MB = 150;
 
 const OPENAI_MODELS = [
@@ -320,6 +326,11 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const scriptPromptsQuery = useQuery<ScriptPrompt[]>({
     queryKey: ["/api/script-prompts"],
   });
+  const mediaUrlsQuery = useQuery<Record<number, AssetMediaUrls>>({
+    queryKey: ["/api/assets/media-urls"],
+    enabled: !!editingAsset,
+  });
+  const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
 
   const handleUploadSource = async (file: File) => {
     setSourceUploading(true);
@@ -888,8 +899,17 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 <Label>Product Photo</Label>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    Photo uploaded
+                    {editingAsset?.photoKey ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        Photo attached
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-4 h-4 text-muted-foreground">—</span>
+                        No photo
+                      </>
+                    )}
                   </p>
                   <div className="flex items-center gap-2">
                     <input
@@ -919,6 +939,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     </Button>
                   </div>
                 </div>
+                {currentMedia?.photoUrl && (
+                  <img
+                    src={currentMedia.photoUrl}
+                    alt={`${editingAsset?.name || "Setup"} photo`}
+                    className="h-36 w-full rounded-lg border object-cover sm:w-56"
+                  />
+                )}
                 {replacePhotoUploading && (
                   <div className="space-y-1">
                     <Progress value={replacePhotoProgress} className="h-2" />
@@ -931,8 +958,17 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 <Label>Video</Label>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    Video uploaded
+                    {editingAsset?.videoKey ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        Video attached
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-4 h-4 text-muted-foreground">—</span>
+                        No video
+                      </>
+                    )}
                   </p>
                   <div className="flex items-center gap-2">
                     <input
@@ -962,6 +998,14 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     </Button>
                   </div>
                 </div>
+                {currentMedia?.videoUrl && (
+                  <video
+                    src={currentMedia.videoUrl}
+                    controls
+                    playsInline
+                    className="h-48 w-full rounded-lg border bg-black object-contain sm:w-56"
+                  />
+                )}
                 {replaceVideoUploading && (
                   <div className="space-y-1">
                     <Progress value={replaceVideoProgress} className="h-2" />
@@ -1014,6 +1058,9 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     </Button>
                   </div>
                 </div>
+                {currentMedia?.musicUrl && (
+                  <audio src={currentMedia.musicUrl} controls className="w-full" />
+                )}
                 {replaceMusicUploading && (
                   <div className="space-y-1">
                     <Progress value={replaceMusicProgress} className="h-2" />

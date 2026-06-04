@@ -8,16 +8,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy } from "lucide-react";
 import type { Asset } from "@shared/schema";
 
+export type AssetMediaUrls = {
+  photoUrl: string | null;
+  videoUrl: string | null;
+  musicUrl: string | null;
+};
+
 interface SetupsListProps {
   onActivate: () => void;
   onEdit: (asset: Asset) => void;
+  onOpenStudio?: (asset: Asset, media?: AssetMediaUrls) => void;
 }
 
-export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
+export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps) {
   const { toast } = useToast();
 
   const assetsQuery = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
+  });
+  const mediaUrlsQuery = useQuery<Record<number, AssetMediaUrls>>({
+    queryKey: ["/api/assets/media-urls"],
+    enabled: !!assetsQuery.data?.length,
   });
 
   const activateMutation = useMutation({
@@ -103,15 +114,44 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
         <Badge variant="secondary">{assetsQuery.data.length} setup{assetsQuery.data.length !== 1 ? "s" : ""}</Badge>
       </div>
 
-      {assetsQuery.data.map((asset) => (
+      {assetsQuery.data.map((asset) => {
+        const media = mediaUrlsQuery.data?.[asset.id];
+        const thumbnailUrl = media?.photoUrl || media?.videoUrl || null;
+        return (
         <Card key={asset.id}>
           <CardContent className="p-5">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 max-sm:flex-col">
+              <button
+                type="button"
+                className="relative grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 bg-black/30 text-muted-foreground max-sm:h-36 max-sm:w-full"
+                onClick={() => onOpenStudio?.(asset, media)}
+                disabled={!onOpenStudio}
+                title="Open in Studio"
+              >
+                {thumbnailUrl ? (
+                  <img
+                    src={thumbnailUrl}
+                    alt={asset.name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <Image className="h-8 w-8" />
+                )}
+                {asset.videoKey && (
+                  <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 p-1 text-white">
+                    <Film className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </button>
               <div className="flex-1 min-w-0 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-medium truncate" data-testid={`text-asset-name-${asset.id}`}>
                     {asset.name}
                   </h3>
+                  {asset.name.startsWith("Recovered Asset ") && (
+                    <Badge variant="outline" className="text-xs">Recovered</Badge>
+                  )}
                   {asset.voiceName && (
                     <Badge variant="secondary" className="text-xs">
                       <Mic className="w-3 h-3 mr-1" />
@@ -126,13 +166,15 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
 
                 <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                   <span className="flex items-center gap-1">
-                    <Image className="w-3 h-3" /> Photo
+                    <Image className="w-3 h-3" /> {asset.photoKey ? "Photo" : "No photo"}
                   </span>
                   <span className="flex items-center gap-1">
-                    {asset.videoSource === "builder" ? (
+                    {asset.videoKey ? (
+                      <><Film className="w-3 h-3" /> Video</>
+                    ) : asset.videoSource === "builder" ? (
                       <><Clapperboard className="w-3 h-3" /> Builder</>
                     ) : (
-                      <><Film className="w-3 h-3" /> Video</>
+                      <><Film className="w-3 h-3" /> No video</>
                     )}
                   </span>
                   <span className="flex items-center gap-1">
@@ -149,12 +191,25 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 max-sm:w-full max-sm:flex-wrap">
+                {onOpenStudio && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onOpenStudio(asset, media)}
+                    data-testid={`button-open-studio-${asset.id}`}
+                    className="max-sm:flex-1"
+                  >
+                    <Clapperboard className="w-4 h-4 mr-1" />
+                    Studio
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   onClick={() => activateMutation.mutate(asset.id)}
                   disabled={activateMutation.isPending}
                   data-testid={`button-activate-${asset.id}`}
+                  className="max-sm:flex-1"
                 >
                   {activateMutation.isPending ? (
                     <Loader2 className="w-4 h-4 animate-spin mr-1" />
@@ -164,13 +219,21 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
                   {asset.videoSource === "builder" ? "Activate shuffle" : "Activate"}
                 </Button>
                 <Button
-                  size="icon"
+                  size="sm"
                   variant="secondary"
-                  onClick={() => onEdit(asset)}
+                  onClick={() => {
+                    if (onOpenStudio && (asset.videoSource === "builder" || asset.name.startsWith("Recovered Asset "))) {
+                      onOpenStudio(asset, media);
+                      return;
+                    }
+                    onEdit(asset);
+                  }}
                   data-testid={`button-edit-${asset.id}`}
                   title="Edit setup"
+                  className="max-sm:flex-1"
                 >
                   <Pencil className="w-4 h-4" />
+                  <span className="ml-1">Edit</span>
                 </Button>
                 <Button
                   size="icon"
@@ -200,7 +263,8 @@ export function SetupsList({ onActivate, onEdit }: SetupsListProps) {
             </div>
           </CardContent>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }

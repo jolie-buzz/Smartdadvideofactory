@@ -31,7 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { SetupForm } from "@/components/setup-form";
-import { SetupsList } from "@/components/setups-list";
+import { SetupsList, type AssetMediaUrls } from "@/components/setups-list";
 import { JobsList } from "@/components/jobs-list";
 import { AssetPanel, type StudioLibraryAsset } from "./asset-panel";
 import { AiChatPanel } from "./ai-chat-panel";
@@ -219,6 +219,43 @@ const readMediaDuration = (file: File): Promise<number | null> => new Promise((r
   element.src = url;
 });
 
+const readRemoteMediaDuration = (uri: string, mediaType: "video" | "audio"): Promise<number | null> => new Promise((resolve) => {
+  const element = mediaType === "video"
+    ? document.createElement("video")
+    : document.createElement("audio");
+  const cleanup = () => {
+    element.removeAttribute("src");
+  };
+
+  element.preload = "metadata";
+  element.onloadedmetadata = () => {
+    const duration = Number.isFinite(element.duration) && element.duration > 0
+      ? Number(element.duration.toFixed(2))
+      : null;
+    cleanup();
+    resolve(duration);
+  };
+  element.onerror = () => {
+    cleanup();
+    resolve(null);
+  };
+  element.src = uri;
+});
+
+const mimeTypeFromKey = (key: string, fallback: string) => {
+  const lower = key.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".m4a")) return "audio/mp4";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  return fallback;
+};
+
 const moveMainVideoClipWithRipple = (timeline: BuzzlyTimelineJson, id: string, desiredStartTime: number): BuzzlyTimelineJson => {
   let didMoveSequenceClip = false;
   const nextTracks = timeline.tracks.map((track) => {
@@ -320,6 +357,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   );
   const mainVideoClipCount = useMemo(
     () => timeline.tracks.find((track) => track.id === "video-main")?.items.filter((item) => item.type === "video").length || 0,
+    [timeline.tracks],
+  );
+  const setupBuilderMediaCount = useMemo(
+    () => timeline.tracks.flatMap((track) => track.items).filter((item) => item.type === "video" || item.type === "image").length,
     [timeline.tracks],
   );
   const permissions = useMemo(() => getActivePermissions(timeline), [timeline]);
@@ -1218,6 +1259,139 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     setActiveRail("setup");
   };
 
+  const handleOpenSetupInStudio = async (asset: Asset, media?: AssetMediaUrls) => {
+    if (!requirePermission("edit-project")) return;
+    try {
+      const mediaUrls = media ?? await fetch("/api/assets/media-urls", { credentials: "include" })
+        .then((res) => {
+          if (!res.ok) throw new Error("Could not load asset media URLs");
+          return res.json() as Promise<Record<number, AssetMediaUrls>>;
+        })
+        .then((urls) => urls[asset.id]);
+
+      if (!mediaUrls?.videoUrl && !mediaUrls?.photoUrl && !mediaUrls?.musicUrl) {
+        toast({ title: "No media found", description: "This setup has no recoverable media attached yet.", variant: "destructive" });
+        return;
+      }
+
+      const videoDuration = mediaUrls.videoUrl
+        ? await readRemoteMediaDuration(mediaUrls.videoUrl, "video")
+        : null;
+      const audioDuration = mediaUrls.musicUrl
+        ? await readRemoteMediaDuration(mediaUrls.musicUrl, "audio")
+        : null;
+      const visualDuration = videoDuration || 8;
+      const projectDuration = Math.ceil(Math.max(visualDuration, audioDuration || 0, 8));
+      const videoItems: BuzzlyTimelineItem[] = [];
+      const imageItems: BuzzlyTimelineItem[] = [];
+      const audioItems: BuzzlyTimelineItem[] = [];
+
+      if (mediaUrls.videoUrl) {
+        videoItems.push({
+          id: `recovered-video-${asset.id}`,
+          type: "video",
+          name: asset.name,
+          trackId: "video-main",
+          source: {
+            kind: "remote",
+            uri: mediaUrls.videoUrl,
+            filename: asset.videoKey.split("/").pop() || asset.videoKey,
+            mimeType: mimeTypeFromKey(asset.videoKey, "video/mp4"),
+          },
+          startTime: 0,
+          duration: visualDuration,
+          trimStart: 0,
+          trimEnd: visualDuration,
+          volume: 0.8,
+          position: { x: 0.5, y: 0.5 },
+          ...defaultVisualFrame("video"),
+          opacity: 1,
+        });
+      }
+
+      if (mediaUrls.photoUrl) {
+        imageItems.push({
+          id: `recovered-photo-${asset.id}`,
+          type: "image",
+          name: `${asset.name} photo`,
+          trackId: "image-overlays",
+          source: {
+            kind: "remote",
+            uri: mediaUrls.photoUrl,
+            filename: asset.photoKey.split("/").pop() || asset.photoKey,
+            mimeType: mimeTypeFromKey(asset.photoKey, "image/jpeg"),
+          },
+          startTime: mediaUrls.videoUrl ? Math.max(0, visualDuration - 4) : 0,
+          duration: mediaUrls.videoUrl ? 4 : visualDuration,
+          trimStart: 0,
+          trimEnd: mediaUrls.videoUrl ? 4 : visualDuration,
+          volume: 0,
+          position: { x: 0.5, y: 0.5 },
+          ...defaultVisualFrame("image"),
+          opacity: 1,
+        });
+      }
+
+      if (mediaUrls.musicUrl) {
+        audioItems.push({
+          id: `recovered-music-${asset.id}`,
+          type: "audio",
+          name: `${asset.name} music`,
+          trackId: "audio-main",
+          source: {
+            kind: "remote",
+            uri: mediaUrls.musicUrl,
+            filename: asset.musicKey?.split("/").pop() || asset.musicKey || "music.mp3",
+            mimeType: mimeTypeFromKey(asset.musicKey || "", "audio/mpeg"),
+          },
+          startTime: 0,
+          duration: Math.min(audioDuration || projectDuration, projectDuration),
+          trimStart: 0,
+          trimEnd: Math.min(audioDuration || projectDuration, projectDuration),
+          volume: asset.musicVolume ?? 0.3,
+          position: { x: 0.5, y: 0.5 },
+          scale: 1,
+          opacity: 1,
+        });
+      }
+
+      setTimeline((current) => {
+        const nextTimeline: BuzzlyTimelineJson = {
+          ...current,
+          project: {
+            ...current.project,
+            name: asset.name,
+            duration: projectDuration,
+          },
+          tracks: current.tracks.map((track) => {
+            if (track.id === "video-main") return { ...track, items: videoItems };
+            if (track.id === "image-overlays") return { ...track, items: imageItems };
+            if (track.id === "audio-main") return { ...track, items: audioItems };
+            if (track.type === "text" || track.type === "caption") return { ...track, items: [] };
+            return { ...track, items: [] };
+          }),
+        };
+        return {
+          ...nextTimeline,
+          assetIntelligence: buildSmartAssetMapping(nextTimeline),
+          smartSceneGeneration: buildSmartSceneGeneration({
+            ...nextTimeline,
+            assetIntelligence: buildSmartAssetMapping(nextTimeline),
+          }),
+        };
+      });
+      setEditingAsset(asset);
+      setSetupBuilderMode(true);
+      setSetupMode("form");
+      setSelectedItemId(videoItems[0]?.id || imageItems[0]?.id || audioItems[0]?.id || null);
+      seekTo(0);
+      setActiveRail("studio");
+      toast({ title: "Opened in Studio", description: `${asset.name} media is ready to preview and edit.` });
+    } catch (err: any) {
+      toast({ title: "Could not open Studio", description: err.message, variant: "destructive" });
+    }
+  };
+
   const handleSetupComplete = () => {
     setEditingAsset(null);
     setActiveRail("setups");
@@ -1525,7 +1699,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     setActiveRail("setup");
     toast({
       title: "Clips ready",
-      description: `${setupBuilderFiles.length} Studio clip${setupBuilderFiles.length === 1 ? "" : "s"} will be used for Generate.`,
+      description: `${setupBuilderMediaCount} Studio clip${setupBuilderMediaCount === 1 ? "" : "s"} will be used for Generate.`,
     });
   };
 
@@ -1934,6 +2108,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   onSetupComplete={handleSetupComplete}
                   onCancelSetupEdit={handleCancelSetupEdit}
                   onEditSetup={handleEditSetup}
+                  onOpenSetupInStudio={handleOpenSetupInStudio}
                   onActivateSetup={() => navigateRail("jobs")}
                   onCreateSetup={() => {
                     setSetupBuilderMode(false);
@@ -2050,7 +2225,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                     {setupBuilderMode && (
                       <div className="mr-2 hidden items-center gap-2 rounded-md border border-[#ffc400]/35 bg-[#ffc400]/10 px-3 py-2 text-xs text-[#ffc400] md:flex">
                         Setup Builder
-                        <span className="text-white/80">· {setupBuilderFiles.length} clip{setupBuilderFiles.length === 1 ? "" : "s"}</span>
+                        <span className="text-white/80">· {setupBuilderMediaCount} clip{setupBuilderMediaCount === 1 ? "" : "s"}</span>
                       </div>
                     )}
                     <Button
@@ -2066,7 +2241,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                         variant="outline"
                         className="h-10 gap-2 border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
                         onClick={finishSetupVideoBuilder}
-                        disabled={setupBuilderFiles.length === 0}
+                        disabled={setupBuilderMediaCount === 0}
                       >
                         <CheckCircle2 className="h-4 w-4" />
                         Done edit
@@ -2129,7 +2304,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                     variant="outline"
                     className="h-11 min-w-0 flex-1 border-emerald-400/30 bg-emerald-400/10 px-2 text-xs text-emerald-200 hover:bg-emerald-400/20"
                     onClick={setupBuilderMode ? finishSetupVideoBuilder : () => navigateRail("setup")}
-                    disabled={setupBuilderMode && setupBuilderFiles.length === 0}
+                    disabled={setupBuilderMode && setupBuilderMediaCount === 0}
                   >
                     <CheckCircle2 className="mr-1 h-4 w-4" />
                     Done
@@ -2468,6 +2643,7 @@ function StudioWorkflowPanel({
   onSetupComplete,
   onCancelSetupEdit,
   onEditSetup,
+  onOpenSetupInStudio,
   onActivateSetup,
   onCreateSetup,
   onOpenStudio,
@@ -2488,6 +2664,7 @@ function StudioWorkflowPanel({
   onSetupComplete: () => void;
   onCancelSetupEdit: () => void;
   onEditSetup: (asset: Asset) => void;
+  onOpenSetupInStudio: (asset: Asset, media?: AssetMediaUrls) => void;
   onActivateSetup: () => void;
   onCreateSetup: () => void;
   onOpenStudio: () => void;
@@ -2564,7 +2741,7 @@ function StudioWorkflowPanel({
           />
         )}
         {activeRail === "setups" && (
-          <SetupsList onActivate={onActivateSetup} onEdit={onEditSetup} />
+          <SetupsList onActivate={onActivateSetup} onEdit={onEditSetup} onOpenStudio={onOpenSetupInStudio} />
         )}
         {activeRail === "jobs" && <JobsList />}
         {activeRail === "settings" && <StudioSettingsPanel />}

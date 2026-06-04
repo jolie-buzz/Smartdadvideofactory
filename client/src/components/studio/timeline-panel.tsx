@@ -262,6 +262,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const [aiProgress, setAiProgress] = useState(0);
   const [aiStatus, setAiStatus] = useState("");
   const [aiError, setAiError] = useState("");
+  const [mobilePanel, setMobilePanel] = useState<"scale" | "tools" | null>(null);
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
@@ -459,6 +460,54 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
           )}
           <div className="text-xs text-slate-400">Duration: <span className="text-white">{formatSeconds(timeline.project.duration)}</span></div>
         </div>
+      </div>
+
+      <div className="hidden shrink-0 border-b border-white/10 bg-[#0b1018] max-md:block">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <button
+            type="button"
+            className={`min-h-10 flex-1 rounded-xl border px-3 text-left text-xs font-medium ${
+              mobilePanel === "scale"
+                ? "border-[#ffc400]/60 bg-[#ffc400]/15 text-[#ffc400]"
+                : "border-white/10 bg-white/[0.04] text-slate-300"
+            }`}
+            onClick={() => setMobilePanel((panel) => panel === "scale" ? null : "scale")}
+          >
+            Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
+          </button>
+          <button
+            type="button"
+            className={`min-h-10 flex-1 rounded-xl border px-3 text-xs font-medium ${
+              mobilePanel === "tools"
+                ? "border-[#ffc400]/60 bg-[#ffc400]/15 text-[#ffc400]"
+                : "border-white/10 bg-white/[0.04] text-slate-300"
+            }`}
+            onClick={() => setMobilePanel((panel) => panel === "tools" ? null : "tools")}
+          >
+            Tools
+          </button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 border-white/10 bg-white/[0.04] px-3 text-xs text-white hover:bg-white/10"
+            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
+          >
+            Fit
+          </Button>
+        </div>
+        {mobilePanel === "scale" && (
+          <div className="flex items-center gap-3 border-t border-white/10 px-3 py-2">
+            <Slider
+              value={[pixelsPerSecond]}
+              min={MIN_PIXELS_PER_SECOND}
+              max={MAX_PIXELS_PER_SECOND}
+              step={1}
+              onValueChange={([value]) => setPixelsPerSecond(value)}
+              className="min-w-0 flex-1"
+            />
+            <span className="w-14 text-right text-[11px] font-medium text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
+          </div>
+        )}
       </div>
 
       <div
@@ -743,28 +792,8 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
           </div>
         </div>
       </div>
+      {mobilePanel === "tools" && (
       <div className="hidden shrink-0 border-t border-white/10 bg-[#0b1018] max-md:block">
-        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-          <div className="text-[11px] font-medium text-slate-400">
-            Scale <span className="text-[#ffc400]">{Math.round(effectivePixelsPerSecond)}px/s</span>
-          </div>
-          <Slider
-            value={[pixelsPerSecond]}
-            min={MIN_PIXELS_PER_SECOND}
-            max={MAX_PIXELS_PER_SECOND}
-            step={1}
-            onValueChange={([value]) => setPixelsPerSecond(value)}
-            className="min-w-0 flex-1"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 border-white/10 bg-white/[0.04] px-3 text-xs text-white hover:bg-white/10"
-            onClick={() => setPixelsPerSecond(fitPixelsPerSecond)}
-          >
-            Fit
-          </Button>
-        </div>
         <div className="flex gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[
             { label: "Split", icon: Scissors, action: "split" as const },
@@ -840,6 +869,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
           </div>
         )}
       </div>
+      )}
       {transitionPair && (
         <div className="fixed z-50 w-[320px] rounded-xl border border-white/10 bg-[#0b1018] p-4 text-white shadow-2xl" style={{ left: pickerLeft, top: pickerTop }}>
           <div className="mb-3 flex items-start justify-between gap-3">

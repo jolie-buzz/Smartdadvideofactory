@@ -52,6 +52,16 @@ export async function getSignedDownloadUrl(key: string, forceDownload?: string):
   return getSignedUrl(s3, command, { expiresIn: ttl });
 }
 
+export async function getR2ObjectStream(key: string, range?: string) {
+  return s3.send(
+    new GetObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Range: range,
+    })
+  );
+}
+
 export async function getSignedUploadUrl(key: string, contentType: string): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: R2_BUCKET,

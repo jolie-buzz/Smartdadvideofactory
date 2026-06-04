@@ -1,7 +1,7 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2 } from "./r2";
+import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
 import { requireAuth, requireAdmin, hashPassword } from "./auth";
@@ -27,6 +27,37 @@ const upload = multer({
     fileSize: 200 * 1024 * 1024,
   },
 });
+
+const contentTypeFromKey = (key: string, fallback = "application/octet-stream") => {
+  const ext = path.extname(key).toLowerCase();
+  if ([".jpg", ".jpeg"].includes(ext)) return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".mp4") return "video/mp4";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".wav") return "audio/wav";
+  return fallback;
+};
+
+const pipeR2Media = async (res: Response, key: string, range?: string) => {
+  const result = await getR2ObjectStream(key, range);
+  const statusCode = result.ContentRange ? 206 : 200;
+  res.status(statusCode);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "private, max-age=300");
+  const contentType = result.ContentType && result.ContentType !== "application/octet-stream"
+    ? result.ContentType
+    : contentTypeFromKey(key);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", "inline");
+  if (result.ContentLength !== undefined) res.setHeader("Content-Length", String(result.ContentLength));
+  if (result.ContentRange) res.setHeader("Content-Range", result.ContentRange);
+  (result.Body as NodeJS.ReadableStream).pipe(res);
+};
 
 function runRouteFfmpeg(args: string[], timeoutMs = 300_000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -332,17 +363,38 @@ export async function registerRoutes(
   app.get("/api/assets/media-urls", requireAuth, async (req, res) => {
     try {
       const assetsList = await storage.getAssets(req.user!.role === "admin" ? undefined : req.user!.id);
-      const entries = await Promise.all(assetsList.map(async (asset) => {
-        const [photoUrl, videoUrl, musicUrl] = await Promise.all([
-          asset.photoKey ? getSignedDownloadUrl(asset.photoKey).catch(() => null) : Promise.resolve(null),
-          asset.videoKey ? getSignedDownloadUrl(asset.videoKey).catch(() => null) : Promise.resolve(null),
-          asset.musicKey ? getSignedDownloadUrl(asset.musicKey).catch(() => null) : Promise.resolve(null),
-        ]);
+      const entries = assetsList.map((asset) => {
+        const photoUrl = asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null;
+        const videoUrl = asset.videoKey ? `/api/assets/${asset.id}/media/video` : null;
+        const musicUrl = asset.musicKey ? `/api/assets/${asset.id}/media/music` : null;
         return [asset.id, { photoUrl, videoUrl, musicUrl }];
-      }));
+      });
       res.json(Object.fromEntries(entries));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/assets/:id/media/:kind", requireAuth, async (req, res) => {
+    try {
+      const asset = await storage.getAsset(parseInt(req.params.id));
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (req.user!.role !== "admin" && asset.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const kind = req.params.kind;
+      const key =
+        kind === "photo" ? asset.photoKey :
+        kind === "video" ? asset.videoKey :
+        kind === "music" ? asset.musicKey :
+        null;
+      if (!key) return res.status(404).json({ error: "Media not found" });
+
+      await pipeR2Media(res, key, req.headers.range);
+    } catch (err: any) {
+      console.error("Asset media stream error:", err);
+      if (!res.headersSent) res.status(500).json({ error: err.message || "Failed to load media" });
     }
   });
 

@@ -374,7 +374,11 @@ async function processJob(jobId: number): Promise<void> {
 
       const allShots = await storage.getShots(asset.id);
       if (allShots.length === 0) {
-        throw new Error("No shots uploaded for this Video Builder setup. Upload shot clips first.");
+        if (asset.videoKey) {
+          await storage.appendJobLog(jobId, "No builder shots found yet. Using the attached setup video for this run.");
+        } else {
+          throw new Error("No shots uploaded for this Video Builder setup. Upload shot clips first.");
+        }
       }
 
       const recentClipIds = await storage.getRecentVariantClipIds(asset.id, 10);
@@ -386,7 +390,9 @@ async function processJob(jobId: number): Promise<void> {
         .filter(Boolean) as Array<{ shot: typeof allShots[number]; mode: string; index: number }>;
 
       let clipIds: number[] = [];
-      if (builderSlots.length > 0) {
+      if (allShots.length === 0 && asset.videoKey) {
+        clipIds = [];
+      } else if (builderSlots.length > 0) {
         const sortedSlots = [...builderSlots].sort((a, b) => a.index - b.index);
         if (job.activateShuffle) {
           const shufflePool = sortedSlots.filter((slot) => slot.mode === "SHUFFLE").map((slot) => slot.shot);
@@ -480,6 +486,9 @@ async function processJob(jobId: number): Promise<void> {
         }
       }
 
+      if (allShots.length === 0 && asset.videoKey) {
+        await storage.appendJobLog(jobId, "Continuing pipeline with existing video.");
+      } else {
       const templateDuration = 45;
 
       const variant = await storage.createVariant({
@@ -502,6 +511,7 @@ async function processJob(jobId: number): Promise<void> {
       if (updatedAsset) Object.assign(asset, updatedAsset);
 
       await storage.appendJobLog(jobId, `Video built and ready. Continuing pipeline...`);
+      }
     }
 
     // ── Step 1: Generate script ──────────────────────────────────────────────

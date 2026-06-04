@@ -815,6 +815,13 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No voice selected for this setup. Please edit the setup first." });
       }
 
+      if (asset.videoSource === "builder") {
+        const shotsList = await storage.getShots(assetId);
+        if (shotsList.length === 0 && !asset.videoKey) {
+          return res.status(400).json({ error: "No shots saved for this setup. Open Studio Builder, add clips, then save the setup before activating." });
+        }
+      }
+
       const activateShuffle = Boolean(req.body.shuffle);
       const job = await storage.createJob(assetId, req.user!.id, activateShuffle);
       await storage.appendJobLog(job.id, activateShuffle ? "Job created with shuffle, queued for processing" : "Job created, queued for processing");

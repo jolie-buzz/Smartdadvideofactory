@@ -2846,6 +2846,7 @@ function StudioWorkflowPanel({
             initialVideoSource={lastGuidedDraft || setupBuilderFiles.length > 0 ? "builder" : undefined}
             studioVideoFiles={setupBuilderFiles}
             onOpenVideoBuilder={onOpenStudioBuilder}
+            onOpenExistingStudio={onOpenSetupInStudio}
           />
         )}
         {activeRail === "setups" && (

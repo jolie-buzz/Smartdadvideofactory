@@ -127,7 +127,24 @@ async function uploadFileWithProgress(
 
 const studioClipKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
+const readVideoFileDuration = (file: File): Promise<number> => new Promise((resolve) => {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.src = url;
+  video.onloadedmetadata = () => {
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 6;
+    URL.revokeObjectURL(url);
+    resolve(Math.round(duration * 10) / 10);
+  };
+  video.onerror = () => {
+    URL.revokeObjectURL(url);
+    resolve(6);
+  };
+});
+
 async function uploadStudioShot(file: File, assetId: number, index: number, category = "BODY"): Promise<PendingShot> {
+  const durationSec = await readVideoFileDuration(file);
   const res = await fetch("/api/upload-shot-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -159,7 +176,7 @@ async function uploadStudioShot(file: File, assetId: number, index: number, cate
     r2Key: key,
     category,
     shotType: SHOT_TYPES[index % SHOT_TYPES.length],
-    durationSec: 6,
+    durationSec,
     filename: file.name,
   };
 }
@@ -175,9 +192,10 @@ interface SetupFormProps {
   initialVideoSource?: "edited" | "builder";
   studioVideoFiles?: File[];
   onOpenVideoBuilder?: () => void;
+  onOpenExistingStudio?: (asset: Asset) => void;
 }
 
-export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], onOpenVideoBuilder }: SetupFormProps) {
+export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], onOpenVideoBuilder, onOpenExistingStudio }: SetupFormProps) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [videoSource, setVideoSource] = useState<"builder">("builder");
@@ -444,6 +462,39 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     setPendingShots((prev) => prev.filter((s) => s.id !== shotId));
   };
 
+  const saveSetupShots = async (assetId: number) => {
+    const studioShots = studioVideoFiles.length > 0
+      ? await Promise.all(studioVideoFiles.map((file, index) => {
+        const category = shuffleStudioClips
+          ? selectedShuffleClipKeys.includes(studioClipKey(file)) ? `SHUFFLE_${index}` : `FIXED_${index}`
+          : `FIXED_${index}`;
+        return uploadStudioShot(file, assetId, index, category);
+      }))
+      : [];
+    const shotsToSave = [...pendingShots, ...studioShots];
+
+    for (const shot of shotsToSave) {
+      const shotRes = await fetch(`/api/assets/${assetId}/shots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: shot.category,
+          shotType: shot.shotType,
+          durationSec: shot.durationSec,
+          r2Key: shot.r2Key,
+          orientation: "portrait",
+          filename: shot.filename,
+        }),
+      });
+      if (!shotRes.ok) {
+        const errData = await shotRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to save shot (${shotRes.status})`);
+      }
+    }
+
+    return shotsToSave.length;
+  };
+
   const handleSave = async () => {
     if (isEditing) {
       try {
@@ -463,8 +514,14 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || `Server error (${res.status})`);
         }
+        const savedShotCount = await saveSetupShots(editingAsset!.id);
         invalidateAssetsCache();
-        toast({ title: "Setup updated", description: "Your setup has been updated successfully." });
+        toast({
+          title: "Setup updated",
+          description: savedShotCount > 0
+            ? `${savedShotCount} shot${savedShotCount === 1 ? "" : "s"} saved for activation.`
+            : "Your setup has been updated successfully.",
+        });
         onCancelEdit?.();
         onComplete();
       } catch (err: any) {
@@ -542,30 +599,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       }
 
       const createdAsset = await res.json();
-
-      const studioShots = studioVideoFiles.length > 0
-        ? await Promise.all(studioVideoFiles.map((file, index) => {
-          const category = shuffleStudioClips
-            ? selectedShuffleClipKeys.includes(studioClipKey(file)) ? `SHUFFLE_${index}` : `FIXED_${index}`
-            : `FIXED_${index}`;
-          return uploadStudioShot(file, createdAsset.id, index, category);
-        }))
-        : [];
-      const shotsToSave = [...pendingShots, ...studioShots];
-      for (const shot of shotsToSave) {
-        await fetch(`/api/assets/${createdAsset.id}/shots`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-              category: shot.category,
-              shotType: shot.shotType,
-              durationSec: shot.durationSec,
-              r2Key: shot.r2Key,
-              orientation: "portrait",
-              filename: shot.filename,
-            }),
-          });
-      }
+      await saveSetupShots(createdAsset.id);
 
       setUploadStep("done");
       invalidateAssetsCache();
@@ -879,57 +913,55 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               </div>
 
               <div className="space-y-2">
-                <Label>Video</Label>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    {editingAsset?.videoKey ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        Video attached
-                      </>
-                    ) : (
-                      <>
-                        <span className="w-4 h-4 text-muted-foreground">—</span>
-                        No video
-                      </>
-                    )}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={replaceVideoInputRef}
-                      type="file"
-                      accept="video/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) handleReplaceFile(f, "video");
-                      }}
-                      data-testid="input-replace-video"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => replaceVideoInputRef.current?.click()}
-                      disabled={replacePhotoUploading || replaceVideoUploading}
-                      data-testid="button-replace-video"
-                    >
-                      {replaceVideoUploading ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="w-4 h-4" />
-                      )}
-                      Replace
-                    </Button>
+                <Label>Video Builder</Label>
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      Builder setup
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={replaceVideoInputRef}
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleReplaceFile(f, "video");
+                        }}
+                        data-testid="input-replace-video"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => editingAsset && onOpenExistingStudio ? onOpenExistingStudio(editingAsset) : onOpenVideoBuilder?.()}
+                        disabled={replaceVideoUploading}
+                        data-testid="button-edit-video-builder"
+                      >
+                        <Clapperboard className="w-4 h-4" />
+                        Edit in Studio
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => replaceVideoInputRef.current?.click()}
+                        disabled={replacePhotoUploading || replaceVideoUploading}
+                        data-testid="button-replace-video"
+                      >
+                        {replaceVideoUploading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                        Replace source
+                      </Button>
+                    </div>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Single video or multiple clips are edited in Studio, then used by Activate or Activate with Shuffle.
+                  </p>
                 </div>
-                {currentMedia?.videoUrl && (
-                  <video
-                    src={currentMedia.videoUrl}
-                    controls
-                    playsInline
-                    className="h-48 w-full rounded-lg border bg-black object-contain sm:w-56"
-                  />
-                )}
                 {replaceVideoUploading && (
                   <div className="space-y-1">
                     <Progress value={replaceVideoProgress} className="h-2" />

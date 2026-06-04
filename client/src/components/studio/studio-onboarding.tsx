@@ -101,7 +101,7 @@ export function StudioOnboarding({ onStart }: StudioOnboardingProps) {
 
   return (
     <main className="min-h-screen overflow-y-auto bg-[#070a0f] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pb-5 pt-[calc(env(safe-area-inset-top)+22px)] sm:px-6 sm:pt-6 lg:px-8">
         <header className="flex min-h-12 items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#ffc400] text-black shadow-[0_0_28px_rgba(255,196,0,0.32)]">

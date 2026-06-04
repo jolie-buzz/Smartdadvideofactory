@@ -73,6 +73,7 @@ type StoredQueryCache = Record<string, { data: unknown; updatedAt: number }>;
 const queryKeyToUrl = (queryKey: QueryKey) => queryKey.map(String).join("/");
 const isCacheableQuery = (queryKey: QueryKey) => {
   const url = queryKeyToUrl(queryKey);
+  if (url === "/api/assets/media-urls") return false;
   return CACHEABLE_API_PREFIXES.some((prefix) => url === prefix || url.startsWith(`${prefix}/`));
 };
 

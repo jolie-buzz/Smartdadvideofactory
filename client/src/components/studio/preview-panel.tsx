@@ -109,6 +109,7 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
   const audioNodesRef = useRef<PreviewAudioNode[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+  const lastPreviewTimeRef = useRef(currentTime);
 
   const activeItems = timeline.tracks
     .flatMap((track) => track.items.map((item) => ({ item, muted: track.muted })))
@@ -261,21 +262,26 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
   }, [isPlaying, activeAudioSignature]);
 
   useEffect(() => {
+    const timeDelta = Math.abs(currentTime - lastPreviewTimeRef.current);
+    const isTimelineScrub = !isPlaying || timeDelta > 0.45;
+    lastPreviewTimeRef.current = currentTime;
+
     visualItems.forEach(({ item }) => {
       if (item.type !== "video" || !item.source?.uri) return;
       const video = videoRefs.current[item.id];
       if (!video) return;
 
       const itemTime = clampNumber(currentTime - item.startTime + item.trimStart, 0, Math.max(0, item.trimEnd - item.trimStart));
-      if (Number.isFinite(itemTime) && Math.abs(video.currentTime - itemTime) > 0.35) {
+      const allowedDrift = isPlaying && !isTimelineScrub ? 1.25 : 0.18;
+      if (Number.isFinite(itemTime) && Math.abs(video.currentTime - itemTime) > allowedDrift) {
         video.currentTime = itemTime;
       }
       video.volume = clampNumber(item.volume, 0, 1);
       video.muted = item.volume <= 0.01;
       video.playbackRate = item.playbackRate || 1;
-      if (isPlaying) {
+      if (isPlaying && video.paused) {
         void video.play().catch(() => undefined);
-      } else {
+      } else if (!isPlaying && !video.paused) {
         video.pause();
       }
     });
@@ -285,13 +291,14 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
       if (!audio) return;
 
       const itemTime = clampNumber(currentTime - item.startTime + item.trimStart, 0, Math.max(0, item.trimEnd - item.trimStart));
-      if (Number.isFinite(itemTime) && Math.abs(audio.currentTime - itemTime) > 0.35) {
+      const allowedDrift = isPlaying && !isTimelineScrub ? 1.25 : 0.18;
+      if (Number.isFinite(itemTime) && Math.abs(audio.currentTime - itemTime) > allowedDrift) {
         audio.currentTime = itemTime;
       }
       audio.volume = clampNumber(item.volume, 0, 1);
-      if (isPlaying) {
+      if (isPlaying && audio.paused) {
         void audio.play().catch(() => undefined);
-      } else {
+      } else if (!isPlaying && !audio.paused) {
         audio.pause();
       }
     });

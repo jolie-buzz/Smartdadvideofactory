@@ -363,12 +363,21 @@ export async function registerRoutes(
   app.get("/api/assets/media-urls", requireAuth, async (req, res) => {
     try {
       const assetsList = await storage.getAssets(req.user!.role === "admin" ? undefined : req.user!.id);
-      const entries = assetsList.map((asset) => {
-        const photoUrl = asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null;
-        const videoUrl = asset.videoKey ? `/api/assets/${asset.id}/media/video` : null;
-        const musicUrl = asset.musicKey ? `/api/assets/${asset.id}/media/music` : null;
+      const useProxy = process.env.MEDIA_PROXY_MODE === "server";
+      const entries = await Promise.all(assetsList.map(async (asset) => {
+        const [photoUrl, videoUrl, musicUrl] = useProxy
+          ? [
+              asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null,
+              asset.videoKey ? `/api/assets/${asset.id}/media/video` : null,
+              asset.musicKey ? `/api/assets/${asset.id}/media/music` : null,
+            ]
+          : await Promise.all([
+              asset.photoKey ? getSignedDownloadUrl(asset.photoKey).catch(() => null) : Promise.resolve(null),
+              asset.videoKey ? getSignedDownloadUrl(asset.videoKey).catch(() => null) : Promise.resolve(null),
+              asset.musicKey ? getSignedDownloadUrl(asset.musicKey).catch(() => null) : Promise.resolve(null),
+            ]);
         return [asset.id, { photoUrl, videoUrl, musicUrl }];
-      });
+      }));
       res.json(Object.fromEntries(entries));
     } catch (err: any) {
       res.status(500).json({ error: err.message });

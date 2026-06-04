@@ -33,7 +33,14 @@ function SetupThumbnail({ asset, media }: { asset: Asset; media?: AssetMediaUrls
         alt={asset.name}
         className="h-full w-full object-cover"
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={(event) => {
+          console.warn("[thumbnail] photo load failed", {
+            assetId: asset.id,
+            assetName: asset.name,
+            src: event.currentTarget.currentSrc || photoUrl,
+          });
+          setFailed(true);
+        }}
       />
     );
   }
@@ -52,7 +59,14 @@ function SetupThumbnail({ asset, media }: { asset: Asset; media?: AssetMediaUrls
             video.currentTime = 0.2;
           }
         }}
-        onError={() => setFailed(true)}
+        onError={(event) => {
+          console.warn("[thumbnail] video fallback load failed", {
+            assetId: asset.id,
+            assetName: asset.name,
+            src: event.currentTarget.currentSrc || videoUrl,
+          });
+          setFailed(true);
+        }}
       />
     );
   }

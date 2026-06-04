@@ -1,7 +1,7 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream } from "./r2";
+import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream, getR2ConfigStatus } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
 import { requireAuth, requireAdmin, hashPassword } from "./auth";
@@ -43,8 +43,20 @@ const contentTypeFromKey = (key: string, fallback = "application/octet-stream") 
   return fallback;
 };
 
-const pipeR2Media = async (res: Response, key: string, range?: string) => {
+const compactMediaError = (err: any) => ({
+  name: err?.name,
+  message: err?.message,
+  code: err?.code || err?.Code,
+  statusCode: err?.$metadata?.httpStatusCode,
+  requestId: err?.$metadata?.requestId,
+});
+
+const pipeR2Media = async (res: Response, key: string, range?: string, context?: { assetId: number; kind: string }) => {
   const result = await getR2ObjectStream(key, range);
+  if (!result.Body) {
+    throw new Error("R2 returned an empty media body");
+  }
+
   const statusCode = result.ContentRange ? 206 : 200;
   res.status(statusCode);
   res.setHeader("Accept-Ranges", "bytes");
@@ -56,6 +68,15 @@ const pipeR2Media = async (res: Response, key: string, range?: string) => {
   res.setHeader("Content-Disposition", "inline");
   if (result.ContentLength !== undefined) res.setHeader("Content-Length", String(result.ContentLength));
   if (result.ContentRange) res.setHeader("Content-Range", result.ContentRange);
+  console.info("[media] R2 stream ok", {
+    ...context,
+    statusCode,
+    contentType,
+    contentLength: result.ContentLength ?? null,
+    contentRange: result.ContentRange ?? null,
+    range: range || null,
+    key,
+  });
   (result.Body as NodeJS.ReadableStream).pipe(res);
 };
 
@@ -398,11 +419,27 @@ export async function registerRoutes(
         kind === "video" ? asset.videoKey :
         kind === "music" ? asset.musicKey :
         null;
-      if (!key) return res.status(404).json({ error: "Media not found" });
+      if (!key) {
+        console.warn("[media] missing asset media key", {
+          assetId: asset.id,
+          kind,
+          hasPhoto: Boolean(asset.photoKey),
+          hasVideo: Boolean(asset.videoKey),
+          hasMusic: Boolean(asset.musicKey),
+        });
+        return res.status(404).json({ error: "Media not found" });
+      }
 
-      await pipeR2Media(res, key, req.headers.range);
+      await pipeR2Media(res, key, req.headers.range, { assetId: asset.id, kind });
     } catch (err: any) {
-      console.error("Asset media stream error:", err);
+      console.error("[media] asset stream failed", {
+        assetId: req.params.id,
+        kind: req.params.kind,
+        userId: req.user?.id,
+        role: req.user?.role,
+        r2: getR2ConfigStatus(),
+        error: compactMediaError(err),
+      });
       if (!res.headersSent) res.status(500).json({ error: err.message || "Failed to load media" });
     }
   });

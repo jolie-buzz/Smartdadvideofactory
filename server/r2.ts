@@ -62,6 +62,16 @@ export async function getR2ObjectStream(key: string, range?: string) {
   );
 }
 
+export function getR2ConfigStatus() {
+  return {
+    accountIdConfigured: Boolean(R2_ACCOUNT_ID),
+    accessKeyIdConfigured: Boolean(R2_ACCESS_KEY_ID),
+    secretAccessKeyConfigured: Boolean(R2_SECRET_ACCESS_KEY),
+    bucketConfigured: Boolean(R2_BUCKET),
+    bucket: R2_BUCKET || null,
+  };
+}
+
 export async function getSignedUploadUrl(key: string, contentType: string): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: R2_BUCKET,

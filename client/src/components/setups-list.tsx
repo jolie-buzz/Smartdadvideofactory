@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy } from "lucide-react";
+import { useState } from "react";
 import type { Asset } from "@shared/schema";
 
 export type AssetMediaUrls = {
@@ -18,6 +19,45 @@ interface SetupsListProps {
   onActivate: () => void;
   onEdit: (asset: Asset) => void;
   onOpenStudio?: (asset: Asset, media?: AssetMediaUrls) => void;
+}
+
+function SetupThumbnail({ asset, media }: { asset: Asset; media?: AssetMediaUrls }) {
+  const [failed, setFailed] = useState(false);
+  const photoUrl = asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null;
+  const videoUrl = media?.videoUrl || (asset.videoKey ? `/api/assets/${asset.id}/media/video` : null);
+
+  if (!failed && photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={asset.name}
+        className="h-full w-full object-cover"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  if (!failed && videoUrl) {
+    return (
+      <video
+        src={videoUrl}
+        className="h-full w-full object-cover"
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          if (Number.isFinite(video.duration) && video.duration > 0.2) {
+            video.currentTime = 0.2;
+          }
+        }}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return <Image className="h-8 w-8" />;
 }
 
 export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps) {
@@ -116,7 +156,6 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
 
       {assetsQuery.data.map((asset) => {
         const media = mediaUrlsQuery.data?.[asset.id];
-        const thumbnailUrl = media?.photoUrl || media?.videoUrl || null;
         return (
         <Card key={asset.id}>
           <CardContent className="p-5">
@@ -128,16 +167,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                 disabled={!onOpenStudio}
                 title="Open in Studio"
               >
-                {thumbnailUrl ? (
-                  <img
-                    src={thumbnailUrl}
-                    alt={asset.name}
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <Image className="h-8 w-8" />
-                )}
+                <SetupThumbnail asset={asset} media={media} />
                 {asset.videoKey && (
                   <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 p-1 text-white">
                     <Film className="h-3.5 w-3.5" />

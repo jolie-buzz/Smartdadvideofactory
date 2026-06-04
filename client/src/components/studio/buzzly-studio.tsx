@@ -128,7 +128,7 @@ const cloneTimeline = (goal?: StudioGoal | null): BuzzlyTimelineJson => {
 };
 
 type StudioRailId = "studio" | "setup" | "setups" | "jobs" | "settings" | "assets" | "text" | "audio" | "elements" | "ai";
-type MobileToolId = Extract<StudioRailId, "assets" | "text" | "audio" | "elements" | "ai"> | null;
+type MobileToolId = Extract<StudioRailId, "text" | "audio" | "elements" | "ai"> | null;
 
 const productionRails = new Set<StudioRailId>(["setup", "setups", "jobs", "settings"]);
 
@@ -138,7 +138,6 @@ const railItems: Array<{ id: StudioRailId; label: string; icon: LucideIcon }> = 
   { id: "setups", label: "Activate", icon: FolderOpen },
   { id: "jobs", label: "Jobs", icon: Zap },
   { id: "settings", label: "Settings", icon: UserCircle },
-  { id: "assets", label: "Assets", icon: FolderOpen },
   { id: "text", label: "Text", icon: Type },
   { id: "audio", label: "Audio", icon: Music2 },
   { id: "elements", label: "Elements", icon: Layers3 },
@@ -2512,7 +2511,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         <div className="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {railItems.map((item) => {
             const Icon = item.icon;
-            const opensSheet = item.id === "assets" || item.id === "text" || item.id === "audio" || item.id === "elements" || item.id === "ai";
+            const opensSheet = item.id === "text" || item.id === "audio" || item.id === "elements" || item.id === "ai";
             const active = opensSheet ? activeRail === item.id || mobileTool === item.id : activeRail === item.id;
             return (
               <button
@@ -2550,7 +2549,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[#ffc400]">Tools</p>
               <h3 className="text-base font-semibold">
-                {mobileTool === "assets" ? "Assets" : mobileTool === "text" ? "Text" : mobileTool === "audio" ? "Audio" : mobileTool === "elements" ? "Elements" : "AI Tools"}
+                {mobileTool === "text" ? "Text" : mobileTool === "audio" ? "Audio" : mobileTool === "elements" ? "Elements" : "AI Tools"}
               </h3>
             </div>
             <Button variant="ghost" className="h-10 px-3 text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => setMobileTool(null)}>
@@ -2558,24 +2557,6 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             </Button>
           </div>
           <div className="max-h-[calc(46dvh-66px)] overflow-y-auto p-4">
-            {mobileTool === "assets" && (
-              <div className="grid grid-cols-2 gap-2">
-                <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={() => videoLayerInputRef.current?.click()}>
-                  <Video className="h-4 w-4" />
-                  Add video
-                </Button>
-                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => imageLayerInputRef.current?.click()}>
-                  <Image className="h-4 w-4" />
-                  Add photo
-                </Button>
-                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => handleTimelineToolAction("split")}>
-                  Split
-                </Button>
-                <Button variant="outline" className="h-12 justify-start gap-2 border-white/10 bg-white/[0.04] text-white hover:bg-white/10" onClick={() => handleTimelineToolAction("duplicate")}>
-                  Duplicate
-                </Button>
-              </div>
-            )}
             {mobileTool === "text" && (
               <div className="grid grid-cols-2 gap-2">
                 <Button className="h-12 justify-start gap-2 bg-[#ffc400] text-black hover:bg-[#ffd84a]" onClick={() => addLayerToTimeline("text")}>

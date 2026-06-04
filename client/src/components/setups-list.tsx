@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star } from "lucide-react";
 import { useState } from "react";
 import type { Asset } from "@shared/schema";
 
@@ -87,14 +87,27 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   });
 
   const activateMutation = useMutation({
-    mutationFn: async (assetId: number) => {
-      const res = await apiRequest("POST", "/api/activate", { assetId });
+    mutationFn: async ({ assetId, shuffle }: { assetId: number; shuffle: boolean }) => {
+      const res = await apiRequest("POST", "/api/activate", { assetId, shuffle });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       toast({ title: "Job activated", description: "A new job has been queued for processing." });
       onActivate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const favoriteMutation = useMutation({
+    mutationFn: async ({ id, isFavorite }: { id: number; isFavorite: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/assets/${id}`, { isFavorite });
+      return res.json();
+    },
+    onSuccess: () => {
+      invalidateAssetsCache();
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -169,7 +182,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         <Badge variant="secondary">{assetsQuery.data.length} setup{assetsQuery.data.length !== 1 ? "s" : ""}</Badge>
       </div>
 
-      {assetsQuery.data.map((asset, index) => {
+      {[...assetsQuery.data].sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite)).map((asset, index) => {
         const media = mediaUrlsQuery.data?.[asset.id];
         return (
         <Card key={asset.id}>
@@ -194,6 +207,18 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   <h3 className="font-medium truncate" data-testid={`text-asset-name-${asset.id}`}>
                     {asset.name}
                   </h3>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className={`h-7 w-7 ${asset.isFavorite ? "text-[#ffc400]" : "text-muted-foreground"}`}
+                    onClick={() => favoriteMutation.mutate({ id: asset.id, isFavorite: !asset.isFavorite })}
+                    disabled={favoriteMutation.isPending}
+                    title={asset.isFavorite ? "Remove favorite" : "Favorite setup"}
+                    data-testid={`button-favorite-${asset.id}`}
+                  >
+                    <Star className={`h-4 w-4 ${asset.isFavorite ? "fill-current" : ""}`} />
+                  </Button>
                   {asset.name.startsWith("Recovered Asset ") && (
                     <Badge variant="outline" className="text-xs">Recovered</Badge>
                   )}
@@ -214,13 +239,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                     <Image className="w-3 h-3" /> {asset.photoKey ? "Photo" : "No photo"}
                   </span>
                   <span className="flex items-center gap-1">
-                    {asset.videoKey ? (
-                      <><Film className="w-3 h-3" /> Video</>
-                    ) : asset.videoSource === "builder" ? (
-                      <><Clapperboard className="w-3 h-3" /> Builder</>
-                    ) : (
-                      <><Film className="w-3 h-3" /> No video</>
-                    )}
+                    <Clapperboard className="w-3 h-3" /> Builder
                   </span>
                   <span className="flex items-center gap-1">
                     <Brain className="w-3 h-3" />
@@ -251,7 +270,8 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                 )}
                 <Button
                   size="sm"
-                  onClick={() => activateMutation.mutate(asset.id)}
+                  variant="secondary"
+                  onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: false })}
                   disabled={activateMutation.isPending}
                   data-testid={`button-activate-${asset.id}`}
                   className="max-sm:flex-1"
@@ -261,13 +281,27 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   ) : (
                     <Zap className="w-4 h-4 mr-1" />
                   )}
-                  {asset.videoSource === "builder" ? "Activate shuffle" : "Activate"}
+                  Activate
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: true })}
+                  disabled={activateMutation.isPending}
+                  data-testid={`button-activate-shuffle-${asset.id}`}
+                  className="max-sm:flex-1"
+                >
+                  {activateMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                  ) : (
+                    <Zap className="w-4 h-4 mr-1" />
+                  )}
+                  Activate with Shuffle
                 </Button>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => {
-                    if (onOpenStudio && (asset.videoSource === "builder" || asset.name.startsWith("Recovered Asset "))) {
+                    if (onOpenStudio) {
                       onOpenStudio(asset, media);
                       return;
                     }

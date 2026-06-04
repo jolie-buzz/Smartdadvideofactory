@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors } from "lucide-react";
 import VideoTrimmer from "./video-trimmer";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 import type { Asset, ScriptPrompt } from "@shared/schema";
 
 interface Voice {
@@ -180,7 +180,7 @@ interface SetupFormProps {
 export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], onOpenVideoBuilder }: SetupFormProps) {
   const { toast } = useToast();
   const [name, setName] = useState("");
-  const [videoSource, setVideoSource] = useState<"edited" | "builder">("edited");
+  const [videoSource, setVideoSource] = useState<"builder">("builder");
   const [personaPrompt, setPersonaPrompt] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
@@ -193,6 +193,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [removeSilencesLongerThan, setRemoveSilencesLongerThan] = useState(0.2);
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
   const [music, setMusic] = useState<File | null>(null);
+  const [selectedMusicKey, setSelectedMusicKey] = useState("");
   const [voiceVolume, setVoiceVolume] = useState(1.0);
   const [musicVolume, setMusicVolume] = useState(0.3);
   const [autoCaptions, setAutoCaptions] = useState(false);
@@ -279,7 +280,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   useEffect(() => {
     if (editingAsset) {
       setName(editingAsset.name);
-      setVideoSource((editingAsset.videoSource as "edited" | "builder") || "edited");
+      setVideoSource("builder");
       setPersonaPrompt(editingAsset.personaPrompt);
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
@@ -291,6 +292,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setIgnoreDetectionsShorterThan(editingAsset.ignoreDetectionsShorterThan);
       setVoiceVolume(editingAsset.voiceVolume ?? 1.0);
       setMusicVolume(editingAsset.musicVolume ?? 0.3);
+      setSelectedMusicKey(editingAsset.musicKey || "");
       setAutoCaptions(editingAsset.autoCaptions ?? false);
       setHookHeadline(editingAsset.hookHeadline ?? false);
       setHookPrompt(editingAsset.hookPrompt || "");
@@ -311,7 +313,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     if (editingAsset) return;
     if (initialName && !name) setName(initialName);
     if (initialPersonaPrompt && !personaPrompt) setPersonaPrompt(initialPersonaPrompt);
-    if (initialVideoSource) setVideoSource(initialVideoSource);
+    setVideoSource("builder");
   }, [editingAsset, initialName, initialPersonaPrompt, initialVideoSource, name, personaPrompt]);
 
   const voicesQuery = useQuery<Voice[]>({
@@ -330,7 +332,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     queryKey: ["/api/assets/media-urls"],
     enabled: !!editingAsset,
   });
+  const assetsQuery = useQuery<Asset[]>({
+    queryKey: ["/api/assets"],
+  });
   const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
+  const uploadedMusicOptions = (assetsQuery.data || [])
+    .filter((asset) => asset.musicKey)
+    .map((asset) => ({ key: asset.musicKey!, label: asset.name }));
 
   const handleUploadSource = async (file: File) => {
     setSourceUploading(true);
@@ -444,9 +452,9 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+            name, videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
-            voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
+            musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
             seoEnabled, seoPrompt: seoPrompt || null, seoModel,
           }),
@@ -468,8 +476,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     }
 
     if (!photo) return;
-    if (videoSource === "edited" && !video) return;
-    if (videoSource === "builder" && pendingShots.length === 0 && studioVideoFiles.length === 0) return;
+    if (pendingShots.length === 0 && studioVideoFiles.length === 0) return;
 
     const photoSizeMB = photo.size / 1024 / 1024;
     if (photoSizeMB > MAX_FILE_SIZE_MB) {
@@ -489,14 +496,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setUploadProgress(0);
       const photoResult = await uploadFileWithProgress(photo, "photo", tempAssetId, setUploadProgress);
 
-      let videoResult: { key: string; assetId: string } | null = null;
-      if (video && videoSource === "edited") {
-        setUploadStep("uploading-video");
-        setUploadProgress(0);
-        videoResult = await uploadFileWithProgress(video, "video", tempAssetId, setUploadProgress);
-      }
-
-      let musicKeyValue: string | null = null;
+      let musicKeyValue: string | null = selectedMusicKey || null;
       if (music) {
         setUploadStep("uploading-music");
         setUploadProgress(0);
@@ -525,8 +525,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, photoKey: photoResult.key, videoKey: videoResult?.key || "",
-          videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+          name, photoKey: photoResult.key, videoKey: "",
+          videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
@@ -543,21 +543,20 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
 
       const createdAsset = await res.json();
 
-      if (videoSource === "builder") {
-        const studioShots = studioVideoFiles.length > 0
-          ? await Promise.all(studioVideoFiles.map((file, index) => {
-            const category = shuffleStudioClips
-              ? selectedShuffleClipKeys.includes(studioClipKey(file)) ? `SHUFFLE_${index}` : `FIXED_${index}`
-              : `FIXED_${index}`;
-            return uploadStudioShot(file, createdAsset.id, index, category);
-          }))
-          : [];
-        const shotsToSave = [...pendingShots, ...studioShots];
-        for (const shot of shotsToSave) {
-          await fetch(`/api/assets/${createdAsset.id}/shots`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+      const studioShots = studioVideoFiles.length > 0
+        ? await Promise.all(studioVideoFiles.map((file, index) => {
+          const category = shuffleStudioClips
+            ? selectedShuffleClipKeys.includes(studioClipKey(file)) ? `SHUFFLE_${index}` : `FIXED_${index}`
+            : `FIXED_${index}`;
+          return uploadStudioShot(file, createdAsset.id, index, category);
+        }))
+        : [];
+      const shotsToSave = [...pendingShots, ...studioShots];
+      for (const shot of shotsToSave) {
+        await fetch(`/api/assets/${createdAsset.id}/shots`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
               category: shot.category,
               shotType: shot.shotType,
               durationSec: shot.durationSec,
@@ -566,7 +565,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               filename: shot.filename,
             }),
           });
-        }
       }
 
       setUploadStep("done");
@@ -577,6 +575,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setPhoto(null);
       setVideo(null);
       setMusic(null);
+      setSelectedMusicKey("");
       setVoiceId("");
       setVoiceName("");
       setOpenaiModel("gpt-4.1");
@@ -663,13 +662,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
 
   const canSave = isEditing
     ? name && personaPrompt && voiceId
-    : name && personaPrompt && photo && (videoSource === "builder" ? pendingShots.length > 0 || studioVideoFiles.length > 0 : !!video) && voiceId;
+    : name && personaPrompt && photo && (pendingShots.length > 0 || studioVideoFiles.length > 0) && voiceId;
 
   const missingFields = [];
   if (!name) missingFields.push("Setup Name");
   if (!isEditing && !photo) missingFields.push("Product Photo");
-  if (!isEditing && videoSource === "edited" && !video) missingFields.push("Edited Video");
-  if (!isEditing && videoSource === "builder" && pendingShots.length === 0 && studioVideoFiles.length === 0) missingFields.push("At least 1 Studio clip");
+  if (!isEditing && pendingShots.length === 0 && studioVideoFiles.length === 0) missingFields.push("At least 1 Studio clip");
   if (!personaPrompt) missingFields.push("Persona Prompt");
   if (!voiceId) missingFields.push("Voice");
 
@@ -752,80 +750,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 )}
               </div>
 
-              <div className="space-y-3">
-                <Label>Video Source</Label>
-                <RadioGroup
-                  value={videoSource}
-                  onValueChange={(v) => {
-                    const nextSource = v as "edited" | "builder";
-                    setVideoSource(nextSource);
-                    if (nextSource === "builder") onOpenVideoBuilder?.();
-                  }}
-                  className="grid grid-cols-2 gap-2"
-                  disabled={isUploading}
-                >
-                  <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
-                    <RadioGroupItem value="edited" id="vs-edited" data-testid="radio-video-edited" />
-                    <Label htmlFor="vs-edited" className="flex cursor-pointer items-center gap-1.5 text-sm leading-tight">
-                      <Film className="w-4 h-4" />
-                      Edited Video
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
-                    <RadioGroupItem value="builder" id="vs-builder" data-testid="radio-video-builder" />
-                    <Label htmlFor="vs-builder" className="flex cursor-pointer items-center gap-1.5 text-sm leading-tight">
-                      <Clapperboard className="w-4 h-4" />
-                      Video Builder
-                    </Label>
-                  </div>
-                </RadioGroup>
-                <p className="text-xs text-muted-foreground">
-                  {videoSource === "edited"
-                    ? "Use one ready video."
-                    : "Upload clips and Buzzly builds the cut."}
-                </p>
-              </div>
-
-              {videoSource === "edited" && (
-                <div className="space-y-2">
-                  <Label htmlFor="video-upload">Edited Video</Label>
-                  <Input
-                    ref={videoInputRef}
-                    id="video-upload"
-                    data-testid="input-video"
-                    type="file"
-                    accept="video/*"
-                    onChange={(e) => setVideo(e.target.files?.[0] || null)}
-                    disabled={isUploading}
-                    className="hidden"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full justify-center gap-2 sm:w-auto"
-                    onClick={() => videoInputRef.current?.click()}
-                    disabled={isUploading}
-                  >
-                    <Film className="h-4 w-4" />
-                    {video ? "Replace video" : "Upload video"}
-                  </Button>
-                  {video && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Film className="w-3 h-3" />
-                      {video.name} ({videoSizeMB.toFixed(1)} MB)
-                    </p>
-                  )}
-                  {isLargeFile && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
-                      Large file - upload may take a while on slow connections
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {videoSource === "builder" && (
-                <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
                   <div className="flex items-center gap-2">
                     <Clapperboard className="w-4 h-4 text-primary" />
                     <h4 className="text-sm font-medium">Video Builder opens in Studio</h4>
@@ -889,7 +814,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     </div>
                   )}
                 </div>
-              )}
             </>
           )}
 
@@ -1286,6 +1210,32 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               Music optional
             </h3>
 
+            <div className="space-y-2">
+              <Label>Choose music</Label>
+              <Select
+                value={selectedMusicKey || "none"}
+                onValueChange={(value) => setSelectedMusicKey(value === "none" ? "" : value)}
+                disabled={isUploading}
+              >
+                <SelectTrigger data-testid="select-background-music">
+                  <SelectValue placeholder="Choose music" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No music</SelectItem>
+                  {FREE_MUSIC_LIBRARY.map((track) => (
+                    <SelectItem key={track.id} value={`public:${track.uri}`}>
+                      {track.title} · {track.mood}
+                    </SelectItem>
+                  ))}
+                  {uploadedMusicOptions.map((option) => (
+                    <SelectItem key={option.key} value={option.key}>
+                      Uploaded · {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {!isEditing && (
               <div className="space-y-2">
                 <Label htmlFor="music-upload">Track</Label>
@@ -1535,21 +1485,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 {uploadStep === "uploading-photo" && <Progress value={uploadProgress} className="h-2" />}
               </div>
 
-              {videoSource === "edited" && (
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-sm">
-                    {uploadStep === "uploading-video" && <Loader2 className="w-3 h-3 animate-spin" />}
-                    {(uploadStep === "uploading-music" || uploadStep === "saving") && <CheckCircle2 className="w-3 h-3 text-green-500" />}
-                    {uploadStep === "uploading-photo" && <span className="w-3 h-3" />}
-                    <span className={uploadStep === "uploading-video" ? "font-medium" : "text-muted-foreground"}>
-                      Upload video
-                    </span>
-                    {uploadStep === "uploading-video" && <span className="ml-auto text-xs">{uploadProgress}%</span>}
-                  </div>
-                  {uploadStep === "uploading-video" && <Progress value={uploadProgress} className="h-2" />}
-                </div>
-              )}
-
               {music && (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 text-sm">
@@ -1569,7 +1504,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 {uploadStep === "saving" && <Loader2 className="w-3 h-3 animate-spin" />}
                 {(uploadStep === "uploading-photo" || uploadStep === "uploading-video" || uploadStep === "uploading-music") && <span className="w-3 h-3" />}
                 <span className={uploadStep === "saving" ? "font-medium" : "text-muted-foreground"}>
-                  Save setup{videoSource === "builder" ? " + shots" : ""}
+                  Save setup + shots
                 </span>
               </div>
             </div>

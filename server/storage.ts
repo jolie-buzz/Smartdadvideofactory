@@ -16,7 +16,7 @@ export interface IStorage {
   getAssets(userId?: number): Promise<Asset[]>;
   getAsset(id: number): Promise<Asset | undefined>;
   deleteAsset(id: number): Promise<void>;
-  createJob(assetId: number, userId?: number): Promise<Job>;
+  createJob(assetId: number, userId?: number, activateShuffle?: boolean): Promise<Job>;
   getJobs(userId?: number): Promise<(Job & { assetName?: string })[]>;
   getJob(id: number): Promise<Job | undefined>;
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
@@ -91,9 +91,9 @@ export class DatabaseStorage implements IStorage {
 
   async getAssets(userId?: number): Promise<Asset[]> {
     if (userId !== undefined) {
-      return db.select().from(assets).where(eq(assets.userId, userId)).orderBy(desc(assets.createdAt));
+      return db.select().from(assets).where(eq(assets.userId, userId)).orderBy(desc(assets.isFavorite), desc(assets.createdAt));
     }
-    return db.select().from(assets).orderBy(desc(assets.createdAt));
+    return db.select().from(assets).orderBy(desc(assets.isFavorite), desc(assets.createdAt));
   }
 
   async getAsset(id: number): Promise<Asset | undefined> {
@@ -105,8 +105,8 @@ export class DatabaseStorage implements IStorage {
     await db.delete(assets).where(eq(assets.id, id));
   }
 
-  async createJob(assetId: number, userId?: number): Promise<Job> {
-    const [result] = await db.insert(jobs).values({ assetId, userId: userId ?? null, status: "queued" }).returning();
+  async createJob(assetId: number, userId?: number, activateShuffle = false): Promise<Job> {
+    const [result] = await db.insert(jobs).values({ assetId, userId: userId ?? null, activateShuffle, status: "queued" }).returning();
     return result;
   }
 

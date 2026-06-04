@@ -51,6 +51,10 @@ const compactMediaError = (err: any) => ({
   requestId: err?.$metadata?.requestId,
 });
 
+const publicMediaUrlFromKey = (key?: string | null) => (
+  key?.startsWith("public:") ? key.slice("public:".length) : null
+);
+
 const pipeR2Media = async (res: Response, key: string, range?: string, context?: { assetId: number; kind: string }) => {
   const result = await getR2ObjectStream(key, range);
   if (!result.Body) {
@@ -326,20 +330,16 @@ export async function registerRoutes(
 
   app.post("/api/setup", requireAuth, async (req, res) => {
     try {
-      const { name, photoKey, videoKey, videoSource, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
       }
-      if (videoSource !== "builder" && !videoKey) {
-        return res.status(400).json({ error: "videoKey is required for edited video source. Upload video first." });
-      }
-
       const asset = await storage.createAsset({
         name: name || "Untitled Setup",
         photoKey,
         videoKey: videoKey || "",
-        videoSource: videoSource || "edited",
+        videoSource: "builder",
         personaPrompt: personaPrompt || "",
         voiceId: voiceId || null,
         voiceName: voiceName || null,
@@ -390,12 +390,14 @@ export async function registerRoutes(
           ? [
               asset.photoKey ? `/api/assets/${asset.id}/media/photo` : null,
               asset.videoKey ? `/api/assets/${asset.id}/media/video` : null,
-              asset.musicKey ? `/api/assets/${asset.id}/media/music` : null,
+              asset.musicKey ? publicMediaUrlFromKey(asset.musicKey) || `/api/assets/${asset.id}/media/music` : null,
             ]
           : await Promise.all([
               asset.photoKey ? getSignedDownloadUrl(asset.photoKey).catch(() => null) : Promise.resolve(null),
               asset.videoKey ? getSignedDownloadUrl(asset.videoKey).catch(() => null) : Promise.resolve(null),
-              asset.musicKey ? getSignedDownloadUrl(asset.musicKey).catch(() => null) : Promise.resolve(null),
+              asset.musicKey
+                ? publicMediaUrlFromKey(asset.musicKey) || getSignedDownloadUrl(asset.musicKey).catch(() => null)
+                : Promise.resolve(null),
             ]);
         return [asset.id, { photoUrl, videoUrl, musicUrl }];
       }));
@@ -430,6 +432,8 @@ export async function registerRoutes(
         });
         return res.status(404).json({ error: "Media not found" });
       }
+      const publicUrl = publicMediaUrlFromKey(key);
+      if (publicUrl) return res.redirect(302, publicUrl);
 
       const range = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
       await pipeR2Media(res, key, range, { assetId: asset.id, kind });
@@ -462,12 +466,13 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
-      if (videoSource !== undefined) updateData.videoSource = videoSource;
+      if (videoSource !== undefined) updateData.videoSource = "builder";
       if (videoKey !== undefined) updateData.videoKey = videoKey;
+      if (isFavorite !== undefined) updateData.isFavorite = Boolean(isFavorite);
       if (photoKey !== undefined) updateData.photoKey = photoKey;
       if (voiceId !== undefined) updateData.voiceId = voiceId;
       if (voiceName !== undefined) updateData.voiceName = voiceName;
@@ -508,7 +513,8 @@ export async function registerRoutes(
         name: `${asset.name} (Copy)`,
         photoKey: asset.photoKey,
         videoKey: asset.videoKey,
-        videoSource: asset.videoSource,
+        videoSource: "builder",
+        isFavorite: asset.isFavorite,
         personaPrompt: asset.personaPrompt,
         voiceId: asset.voiceId,
         voiceName: asset.voiceName,
@@ -809,8 +815,9 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No voice selected for this setup. Please edit the setup first." });
       }
 
-      const job = await storage.createJob(assetId, req.user!.id);
-      await storage.appendJobLog(job.id, "Job created, queued for processing");
+      const activateShuffle = Boolean(req.body.shuffle);
+      const job = await storage.createJob(assetId, req.user!.id, activateShuffle);
+      await storage.appendJobLog(job.id, activateShuffle ? "Job created with shuffle, queued for processing" : "Job created, queued for processing");
 
       res.status(201).json(job);
     } catch (err: any) {

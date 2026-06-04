@@ -24,7 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import type { BuzzlyClipType, BuzzlyTimelineItem, BuzzlyTimelineJson } from "@shared/models/timeline";
@@ -93,7 +93,7 @@ const SNAP_THRESHOLD_SECONDS = 0.35;
 const MAX_VIDEO_THUMBNAILS = 60;
 const LEFT_COLUMN_WIDTH = 148;
 const DEFAULT_PIXELS_PER_SECOND = 75;
-const MIN_PIXELS_PER_SECOND = 20;
+const MIN_PIXELS_PER_SECOND = 1;
 const MAX_PIXELS_PER_SECOND = 300;
 type TimelineThumbnail = {
   time: number;
@@ -253,6 +253,7 @@ function TimelineClipPreview({ item }: { item: BuzzlyTimelineItem }) {
 
 export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedItemIds = [], onSelectItem, onToggleItemSelection, onUpdateItem, onSeek, onToolAction, onTrackUpload, onMoveItem, onTrimItem, onApplyTransition, onGenerateAiTransition }: TimelinePanelProps) {
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const pinchRef = useRef<{ distance: number; pixelsPerSecond: number } | null>(null);
   const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND);
   const [visibleTrackWidth, setVisibleTrackWidth] = useState(1080);
   const [isMobileTimeline, setIsMobileTimeline] = useState(false);
@@ -287,10 +288,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const leftColumnWidth = isMobileTimeline ? 56 : LEFT_COLUMN_WIDTH;
   const playheadLeft = leftColumnWidth + clampNumber(currentTime * effectivePixelsPerSecond, 0, timelineWidth);
 
-  useEffect(() => {
-    setPixelsPerSecond((value) => Math.max(value, fitPixelsPerSecond));
-  }, [fitPixelsPerSecond]);
-  const markerStep = timeline.project.duration > 60 ? 10 : 5;
+  const markerStep = effectivePixelsPerSecond >= 120 ? 1 : effectivePixelsPerSecond >= 70 ? 2 : effectivePixelsPerSecond >= 28 ? 5 : effectivePixelsPerSecond >= 12 ? 10 : 15;
   const markers = Array.from(
     { length: Math.floor(timeline.project.duration / markerStep) + 1 },
     (_, index) => index * markerStep,
@@ -300,6 +298,40 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const selectedVisual = selectedItem && (selectedItem.type === "video" || selectedItem.type === "image") ? selectedItem : null;
   const pickerLeft = transitionPair && typeof window !== "undefined" ? Math.min(Math.max(12, transitionPair.x + 12), window.innerWidth - 340) : 12;
   const pickerTop = transitionPair && typeof window !== "undefined" ? Math.min(Math.max(12, transitionPair.y + 12), window.innerHeight - 460) : 80;
+  const zoomAtClientX = (clientX: number, nextPixelsPerSecond: number) => {
+    const scrollArea = scrollAreaRef.current;
+    const duration = Math.max(1, timeline.project.duration);
+    const clampedNext = clampNumber(nextPixelsPerSecond, MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND);
+    if (!scrollArea) {
+      setPixelsPerSecond(clampedNext);
+      return;
+    }
+    const rect = scrollArea.getBoundingClientRect();
+    const xInTimeline = clampNumber(scrollArea.scrollLeft + clientX - rect.left - leftColumnWidth, 0, timelineWidth);
+    const anchorTime = clampNumber(xInTimeline / effectivePixelsPerSecond, 0, timeline.project.duration);
+    setPixelsPerSecond(clampedNext);
+    requestAnimationFrame(() => {
+      const nextWidth = Math.max(visibleTrackWidth, duration * clampedNext);
+      const nextEffectivePixelsPerSecond = nextWidth / duration;
+      scrollArea.scrollLeft = Math.max(0, leftColumnWidth + anchorTime * nextEffectivePixelsPerSecond - (clientX - rect.left));
+    });
+  };
+  const getTouchDistance = (touches: ReactTouchEvent<HTMLDivElement>["touches"]) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+  const getTouchCenterX = (touches: ReactTouchEvent<HTMLDivElement>["touches"]) => (touches[0].clientX + touches[1].clientX) / 2;
+  const handleTimelineTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2) return;
+    pinchRef.current = { distance: getTouchDistance(event.touches), pixelsPerSecond };
+  };
+  const handleTimelineTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const pinch = pinchRef.current;
+    if (!pinch || event.touches.length !== 2) return;
+    event.preventDefault();
+    zoomAtClientX(getTouchCenterX(event.touches), pinch.pixelsPerSecond * (getTouchDistance(event.touches) / Math.max(1, pinch.distance)));
+  };
+  const handleTimelineTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) pinchRef.current = null;
+  };
 
   return (
     <section className="relative flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:rounded-none max-md:border-x-0 max-md:border-b-0">
@@ -515,6 +547,19 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
       <div
         ref={scrollAreaRef}
         className="relative min-h-0 w-full max-w-full flex-1 overflow-auto [scrollbar-color:#ffc400_#0b1018] [scrollbar-width:thin]"
+        onWheel={(event) => {
+          if (!event.ctrlKey && Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+          event.preventDefault();
+          const direction = event.deltaY > 0 || event.deltaX > 0 ? -1 : 1;
+          const factor = direction > 0 ? 1.08 : 0.92;
+          zoomAtClientX(event.clientX, pixelsPerSecond * factor);
+        }}
+        onTouchStart={handleTimelineTouchStart}
+        onTouchMove={handleTimelineTouchMove}
+        onTouchEnd={handleTimelineTouchEnd}
+        onTouchCancel={() => {
+          pinchRef.current = null;
+        }}
       >
         <div className="min-h-full" style={{ width: leftColumnWidth + timelineWidth }}>
           <div className="grid border-b border-white/10 bg-[#0a0f17]" style={{ gridTemplateColumns: `${leftColumnWidth}px ${timelineWidth}px` }}>

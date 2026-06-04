@@ -34,7 +34,7 @@ import {
   MessageSquare,
   Hash,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type JobWithAsset = {
   id: number;
@@ -256,6 +256,8 @@ export function JobsList() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
+  const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
 
   const toggleExpanded = (id: number) => {
     setExpandedJobs((prev) => {
@@ -283,6 +285,20 @@ export function JobsList() {
       : `/api/jobs/${jobId}/download-audio-clean`;
     window.open(endpoint, "_blank");
   };
+
+  useEffect(() => {
+    localStorage.setItem("buzzly.autoDownloadJobs", autoDownload ? "true" : "false");
+  }, [autoDownload]);
+
+  useEffect(() => {
+    if (!autoDownload || !jobsQuery.data?.length) return;
+    for (const job of jobsQuery.data) {
+      if (job.status !== "done" || !job.finalVideoKey || autoDownloadedJobsRef.current.has(job.id)) continue;
+      autoDownloadedJobsRef.current.add(job.id);
+      handleDownload(job.id, "final");
+      toast({ title: "Auto download", description: `Job #${job.id} video is downloading.` });
+    }
+  }, [autoDownload, jobsQuery.data, toast]);
 
   const deleteJobMutation = useMutation({
     mutationFn: async (jobId: number) => {
@@ -390,6 +406,17 @@ export function JobsList() {
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">Production Jobs</h2>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-md border px-2 py-1">
+            <Label htmlFor="auto-download-jobs" className="text-xs text-muted-foreground">
+              Auto Download
+            </Label>
+            <Switch
+              id="auto-download-jobs"
+              checked={autoDownload}
+              onCheckedChange={setAutoDownload}
+              data-testid="switch-auto-download"
+            />
+          </div>
           {hasActiveJobs && (
             <Badge variant="secondary" className="animate-pulse">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />

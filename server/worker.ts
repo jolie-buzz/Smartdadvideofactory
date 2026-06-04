@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -49,6 +50,29 @@ const transcriptionClient = process.env.OPENAI_API_KEY
     : null;
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+
+function getPublicMusicInput(musicKey: string): string | null {
+  if (!musicKey.startsWith("public:")) return null;
+  const publicPath = musicKey.slice("public:".length);
+  const relativePath = publicPath.replace(/^\/+/, "");
+  const localCandidates = [
+    join(process.cwd(), "dist", "public", relativePath),
+    join(process.cwd(), "client", "public", relativePath),
+  ];
+  const localFile = localCandidates.find((candidate) => existsSync(candidate));
+  if (localFile) return localFile;
+
+  const baseUrl = process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+  return baseUrl ? new URL(publicPath, baseUrl).toString() : null;
+}
+
+async function getMusicInput(musicKey: string | null): Promise<string | null> {
+  if (!musicKey) return null;
+  const publicInput = getPublicMusicInput(musicKey);
+  if (publicInput) return publicInput;
+  if (musicKey.startsWith("public:")) return null;
+  return getSignedDownloadUrl(musicKey);
+}
 
 async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null): Promise<string> {
   let systemMessage = `You are a Buzzly video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
@@ -344,7 +368,9 @@ async function processJob(jobId: number): Promise<void> {
     // ── Video Builder: auto-generate variant if needed ──────────────────────
     if (asset.videoSource === "builder") {
       await storage.updateJob(jobId, { status: "building_video" });
-      await storage.appendJobLog(jobId, "Video Builder mode: creating one fresh shuffled cut from selected shots...");
+      await storage.appendJobLog(jobId, job.activateShuffle
+        ? "Video Builder mode: creating one fresh shuffled cut from selected shots..."
+        : "Video Builder mode: creating cut from the saved Studio order...");
 
       const allShots = await storage.getShots(asset.id);
       if (allShots.length === 0) {
@@ -362,25 +388,34 @@ async function processJob(jobId: number): Promise<void> {
       let clipIds: number[] = [];
       if (builderSlots.length > 0) {
         const sortedSlots = [...builderSlots].sort((a, b) => a.index - b.index);
-        const shufflePool = sortedSlots.filter((slot) => slot.mode === "SHUFFLE").map((slot) => slot.shot);
-        const unusedShuffle = [...shufflePool];
+        if (job.activateShuffle) {
+          const shufflePool = sortedSlots.filter((slot) => slot.mode === "SHUFFLE").map((slot) => slot.shot);
+          const unusedShuffle = [...shufflePool];
 
-        const pickShuffle = () => {
-          const preferred = unusedShuffle.filter((shot) => !recentClipIds.includes(shot.id));
-          const pool = preferred.length > 0 ? preferred : unusedShuffle;
-          if (pool.length === 0) return null;
-          const chosen = pool[Math.floor(Math.random() * pool.length)];
-          const chosenIndex = unusedShuffle.findIndex((shot) => shot.id === chosen.id);
-          if (chosenIndex >= 0) unusedShuffle.splice(chosenIndex, 1);
-          return chosen.id;
-        };
+          const pickShuffle = () => {
+            const preferred = unusedShuffle.filter((shot) => !recentClipIds.includes(shot.id));
+            const pool = preferred.length > 0 ? preferred : unusedShuffle;
+            if (pool.length === 0) return null;
+            const chosen = pool[Math.floor(Math.random() * pool.length)];
+            const chosenIndex = unusedShuffle.findIndex((shot) => shot.id === chosen.id);
+            if (chosenIndex >= 0) unusedShuffle.splice(chosenIndex, 1);
+            return chosen.id;
+          };
 
-        clipIds = sortedSlots
-          .map((slot) => slot.mode === "SHUFFLE" ? pickShuffle() : slot.shot.id)
-          .filter((id): id is number => typeof id === "number");
+          clipIds = sortedSlots
+            .map((slot) => slot.mode === "SHUFFLE" ? pickShuffle() : slot.shot.id)
+            .filter((id): id is number => typeof id === "number");
 
-        await storage.appendJobLog(jobId, `Shuffle clips: ${shufflePool.length} selected, ${sortedSlots.length - shufflePool.length} fixed.`);
+          await storage.appendJobLog(jobId, `Shuffle clips: ${shufflePool.length} selected, ${sortedSlots.length - shufflePool.length} fixed.`);
+        } else {
+          clipIds = sortedSlots.map((slot) => slot.shot.id);
+          await storage.appendJobLog(jobId, `Standard activate: ${clipIds.length} clips kept in Studio order.`);
+        }
       } else {
+        if (!job.activateShuffle) {
+          clipIds = [...allShots].sort((a, b) => a.id - b.id).map((shot) => shot.id);
+          await storage.appendJobLog(jobId, `Standard activate: ${clipIds.length} clips kept in upload order.`);
+        } else {
         const shotsByCategory: Record<string, typeof allShots> = {};
         for (const s of allShots) {
           if (!shotsByCategory[s.category]) shotsByCategory[s.category] = [];
@@ -442,6 +477,7 @@ async function processJob(jobId: number): Promise<void> {
         const ctaId = pick(ctaShots, effectiveBodyShots);
         if (ctaId) clipIds.push(ctaId);
       }
+        }
       }
 
       const templateDuration = 45;
@@ -498,7 +534,7 @@ async function processJob(jobId: number): Promise<void> {
     const [audioRawBuffer, videoUrl, musicUrl] = await Promise.all([
       generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance),
       getSignedDownloadUrl(asset.videoKey),
-      asset.musicKey ? getSignedDownloadUrl(asset.musicKey) : Promise.resolve(null),
+      getMusicInput(asset.musicKey),
     ]);
 
     await storage.appendJobLog(jobId, `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`);

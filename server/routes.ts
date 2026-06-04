@@ -322,7 +322,7 @@ export async function registerRoutes(
 
   app.get("/api/assets", requireAuth, async (req, res) => {
     try {
-      const assetsList = await storage.getAssets(req.user!.id);
+      const assetsList = await storage.getAssets(req.user!.role === "admin" ? undefined : req.user!.id);
       res.json(assetsList);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -703,7 +703,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs", requireAuth, async (req, res) => {
     try {
-      const jobsList = await storage.getJobs(req.user!.id);
+      const jobsList = await storage.getJobs(req.user!.role === "admin" ? undefined : req.user!.id);
       res.json(jobsList);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1391,7 +1391,7 @@ export async function registerRoutes(
 
   app.get("/api/script-prompts", requireAuth, async (req, res) => {
     try {
-      const prompts = await storage.getScriptPrompts(req.user!.id);
+      const prompts = await storage.getScriptPrompts(req.user!.role === "admin" ? undefined : req.user!.id);
       res.json(prompts);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1416,7 +1416,7 @@ export async function registerRoutes(
       const updates: Record<string, string> = {};
       if (name?.trim()) updates.name = name.trim();
       if (promptText?.trim()) updates.promptText = promptText.trim();
-      const prompt = await storage.updateScriptPrompt(id, req.user!.id, updates);
+      const prompt = await storage.updateScriptPrompt(id, req.user!.role === "admin" ? undefined : req.user!.id, updates);
       if (!prompt) return res.status(404).json({ error: "Prompt not found" });
       res.json(prompt);
     } catch (err: any) {
@@ -1426,7 +1426,7 @@ export async function registerRoutes(
 
   app.delete("/api/script-prompts/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteScriptPrompt(parseInt(req.params.id), req.user!.id);
+      await storage.deleteScriptPrompt(parseInt(req.params.id), req.user!.role === "admin" ? undefined : req.user!.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

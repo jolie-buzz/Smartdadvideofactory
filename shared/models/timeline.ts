@@ -3,6 +3,7 @@ export type BuzzlyClipType = "video" | "image" | "audio" | "text" | "caption";
 export type BuzzlySource = {
   kind: "local" | "remote" | "generated" | "mock";
   uri?: string;
+  r2Key?: string;
   filename?: string;
   mimeType?: string;
 };

@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
+import { renderTimelineVideo } from "./timeline-renderer";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
@@ -432,6 +433,23 @@ async function processJob(jobId: number): Promise<void> {
         ? "Video Builder mode: creating one fresh shuffled cut from selected shots..."
         : "Video Builder mode: creating cut from the saved Studio order...");
 
+      let usedTimelineRender = false;
+      const timelineJson = asset.timelineJson as any;
+      if (!job.activateShuffle && timelineJson?.tracks?.length) {
+        try {
+          await storage.appendJobLog(jobId, "Studio timeline found. Rendering saved edits before AI pipeline...");
+          const timelineVideoKey = await renderTimelineVideo(asset.id, timelineJson);
+          await storage.updateAsset(asset.id, { videoKey: timelineVideoKey });
+          const updatedAsset = await storage.getAsset(asset.id);
+          if (updatedAsset) Object.assign(asset, updatedAsset);
+          usedTimelineRender = true;
+          await storage.appendJobLog(jobId, "Edited Studio timeline rendered and ready. Continuing pipeline...");
+        } catch (err: any) {
+          await storage.appendJobLog(jobId, `Studio timeline render unavailable: ${err.message}. Falling back to builder shots/video.`);
+        }
+      }
+
+      if (!usedTimelineRender) {
       const allShots = await storage.getShots(asset.id);
       if (allShots.length === 0) {
         if (asset.videoKey) {
@@ -571,6 +589,7 @@ async function processJob(jobId: number): Promise<void> {
       if (updatedAsset) Object.assign(asset, updatedAsset);
 
       await storage.appendJobLog(jobId, `Video built and ready. Continuing pipeline...`);
+      }
       }
     }
 

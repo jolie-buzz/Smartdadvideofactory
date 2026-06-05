@@ -1358,6 +1358,19 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const handleOpenSetupInStudio = async (asset: Asset, media?: AssetMediaUrls) => {
     if (!requirePermission("edit-project")) return;
     try {
+      const canPreviewSavedTimeline = (savedTimeline: BuzzlyTimelineJson) => {
+        const visualItems = savedTimeline.tracks
+          .flatMap((track) => track.items)
+          .filter((item) => item.type === "video" || item.type === "image");
+
+        if (visualItems.length === 0) return false;
+
+        return visualItems.every((item) => {
+          const uri = item.source?.uri || "";
+          return Boolean(uri && !uri.startsWith("blob:"));
+        });
+      };
+
       if (setupBuilderTimeline?.assetId === asset.id) {
         const restoredTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(setupBuilderTimeline.timeline));
         const restoredItems = restoredTimeline.tracks.flatMap((track) => track.items);
@@ -1374,6 +1387,12 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
 
       if (asset.timelineJson && typeof asset.timelineJson === "object") {
         const savedTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(asset.timelineJson));
+        if (!canPreviewSavedTimeline(savedTimeline)) {
+          toast({
+            title: "Timeline media needs refresh",
+            description: "The saved Studio layout used temporary media links, so Buzzly will rebuild it from the attached setup media.",
+          });
+        } else {
         const savedItems = savedTimeline.tracks.flatMap((track) => track.items);
         setTimeline(savedTimeline);
         setSetupBuilderTimeline({ assetId: asset.id, timeline: savedTimeline });
@@ -1385,6 +1404,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         setActiveRail("studio");
         toast({ title: "Opened saved Studio timeline", description: `${asset.name} timeline edits were restored.` });
         return;
+        }
       }
 
       const mediaUrls = media ?? await fetch("/api/assets/media-urls", { credentials: "include" })

@@ -18,7 +18,7 @@ import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, Chec
 import VideoTrimmer from "./video-trimmer";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 import type { Asset, ScriptPrompt } from "@shared/schema";
-import type { BuzzlyTimelineJson } from "@shared/models/timeline";
+import type { BuzzlyTimelineItem, BuzzlyTimelineJson } from "@shared/models/timeline";
 
 interface Voice {
   voice_id: string;
@@ -39,6 +39,12 @@ interface PendingShot {
   shotType: string | null;
   durationSec: number;
   filename: string;
+}
+
+interface SavedShot extends Omit<PendingShot, "id"> {
+  id: number;
+  assetId: number;
+  orientation: string;
 }
 
 type AssetMediaUrls = {
@@ -464,7 +470,56 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     setPendingShots((prev) => prev.filter((s) => s.id !== shotId));
   };
 
-  const saveSetupShots = async (assetId: number) => {
+  const getTimelineItemFilename = (item: BuzzlyTimelineItem) => {
+    const sourceName = item.source?.filename?.trim();
+    if (sourceName) return sourceName;
+    return item.name.trim();
+  };
+
+  const buildPersistedTimeline = (savedShots: SavedShot[]): BuzzlyTimelineJson | null => {
+    if (!studioTimelineJson) return null;
+
+    const timeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(studioTimelineJson));
+    const shotsByFilename = new Map<string, SavedShot[]>();
+    const shotsByR2Key = new Map(savedShots.map((shot) => [shot.r2Key, shot]));
+
+    for (const shot of savedShots) {
+      const key = shot.filename || "";
+      const queue = shotsByFilename.get(key) || [];
+      queue.push(shot);
+      shotsByFilename.set(key, queue);
+    }
+
+    timeline.tracks = timeline.tracks.map((track) => ({
+      ...track,
+      items: track.items.map((item) => {
+        if (item.type !== "video") return item;
+
+        const existingShot = item.source?.r2Key ? shotsByR2Key.get(item.source.r2Key) : null;
+        const filename = getTimelineItemFilename(item);
+        const queue = shotsByFilename.get(filename);
+        const matchedShot = existingShot || queue?.[0];
+
+        if (!matchedShot) return item;
+
+        return {
+          ...item,
+          source: {
+            ...item.source,
+            kind: "remote",
+            uri: `/api/shots/${matchedShot.id}/media`,
+            r2Key: matchedShot.r2Key,
+            filename: matchedShot.filename || item.source?.filename || item.name,
+            mimeType: item.source?.mimeType || "video/mp4",
+          },
+        };
+      }),
+    }));
+
+    return timeline;
+  };
+
+  const saveSetupShots = async (assetId: number): Promise<SavedShot[]> => {
     const studioShots = studioVideoFiles.length > 0
       ? await Promise.all(studioVideoFiles.map((file, index) => {
         const category = shuffleStudioClips
@@ -474,6 +529,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       }))
       : [];
     const shotsToSave = [...pendingShots, ...studioShots];
+    const savedShots: SavedShot[] = [];
 
     for (const shot of shotsToSave) {
       const shotRes = await fetch(`/api/assets/${assetId}/shots`, {
@@ -492,9 +548,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         const errData = await shotRes.json().catch(() => ({}));
         throw new Error(errData.error || `Failed to save shot (${shotRes.status})`);
       }
+      savedShots.push(await shotRes.json());
     }
 
-    return shotsToSave.length;
+    return savedShots;
   };
 
   const handleSave = async () => {
@@ -509,19 +566,31 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
-            seoEnabled, seoPrompt: seoPrompt || null, seoModel, timelineJson: studioTimelineJson,
+            seoEnabled, seoPrompt: seoPrompt || null, seoModel,
           }),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || `Server error (${res.status})`);
         }
-        const savedShotCount = await saveSetupShots(editingAsset!.id);
+        const savedShots = await saveSetupShots(editingAsset!.id);
+        const persistedTimeline = buildPersistedTimeline(savedShots);
+        if (persistedTimeline) {
+          const timelineRes = await fetch(`/api/assets/${editingAsset!.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ timelineJson: persistedTimeline }),
+          });
+          if (!timelineRes.ok) {
+            const errData = await timelineRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Failed to save Studio timeline (${timelineRes.status})`);
+          }
+        }
         invalidateAssetsCache();
         toast({
           title: "Setup updated",
-          description: savedShotCount > 0
-            ? `${savedShotCount} shot${savedShotCount === 1 ? "" : "s"} saved for activation.`
+          description: savedShots.length > 0
+            ? `${savedShots.length} shot${savedShots.length === 1 ? "" : "s"} saved for activation.`
             : "Your setup has been updated successfully.",
         });
         onCancelEdit?.();
@@ -590,7 +659,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
           captionEnabled, captionPrompt: captionPrompt || null, captionModel,
-          seoEnabled, seoPrompt: seoPrompt || null, seoModel, timelineJson: studioTimelineJson,
+          seoEnabled, seoPrompt: seoPrompt || null, seoModel,
         }),
       });
 
@@ -601,7 +670,19 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       }
 
       const createdAsset = await res.json();
-      await saveSetupShots(createdAsset.id);
+      const savedShots = await saveSetupShots(createdAsset.id);
+      const persistedTimeline = buildPersistedTimeline(savedShots);
+      if (persistedTimeline) {
+        const timelineRes = await fetch(`/api/assets/${createdAsset.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timelineJson: persistedTimeline }),
+        });
+        if (!timelineRes.ok) {
+          const errData = await timelineRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to save Studio timeline (${timelineRes.status})`);
+        }
+      }
 
       setUploadStep("done");
       invalidateAssetsCache();

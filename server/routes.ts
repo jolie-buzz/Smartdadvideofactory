@@ -1250,6 +1250,16 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/shots/:id/media", requireAuth, async (req, res) => {
+    try {
+      const shot = await storage.getShot(parseInt(req.params.id));
+      if (!shot) return res.status(404).json({ error: "Shot not found" });
+      await pipeR2Media(res, shot.r2Key, req.headers.range, { assetId: shot.assetId, kind: "shot" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load shot media" });
+    }
+  });
+
   app.delete("/api/shots/:id", requireAuth, async (req, res) => {
     try {
       await storage.deleteShot(parseInt(req.params.id));

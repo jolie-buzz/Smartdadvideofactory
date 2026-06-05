@@ -42,6 +42,7 @@ export type TimelineToolAction =
   | "speed"
   | "enhance"
   | "cut-dead-air"
+  | "effect-none"
   | "effect-punch"
   | "effect-vivid"
   | "effect-warm"
@@ -388,6 +389,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
           {selectedVisual && (
             <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-md border border-white/10 bg-black/20 p-1">
               {[
+                { label: "No effect", action: "effect-none" as const },
                 { label: "Punch", action: "effect-punch" as const },
                 { label: "Vivid", action: "effect-vivid" as const },
                 { label: "Warm", action: "effect-warm" as const },
@@ -896,6 +898,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
         {selectedVisual && (
           <div className="flex gap-2 overflow-x-auto border-t border-white/10 px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
+              { label: "No effect", action: "effect-none" as const },
               { label: "Punch", action: "effect-punch" as const },
               { label: "Vivid", action: "effect-vivid" as const },
               { label: "Warm", action: "effect-warm" as const },

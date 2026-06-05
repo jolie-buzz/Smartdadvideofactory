@@ -331,7 +331,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", requireAuth, async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -363,6 +363,7 @@ export async function registerRoutes(
         seoEnabled: seoEnabled || false,
         seoPrompt: seoPrompt || null,
         seoModel: seoModel || "gpt-4o",
+        timelineJson: timelineJson || null,
         userId: req.user!.id,
       });
 
@@ -467,7 +468,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite } = req.body;
+      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
@@ -496,6 +497,7 @@ export async function registerRoutes(
       if (seoEnabled !== undefined) updateData.seoEnabled = seoEnabled;
       if (seoPrompt !== undefined) updateData.seoPrompt = seoPrompt;
       if (seoModel !== undefined) updateData.seoModel = seoModel;
+      if (timelineJson !== undefined) updateData.timelineJson = timelineJson;
 
       const updated = await storage.updateAsset(id, updateData);
       res.json(updated);
@@ -538,6 +540,7 @@ export async function registerRoutes(
         seoEnabled: asset.seoEnabled,
         seoPrompt: asset.seoPrompt,
         seoModel: asset.seoModel,
+        timelineJson: asset.timelineJson,
         userId: req.user!.id,
       });
 

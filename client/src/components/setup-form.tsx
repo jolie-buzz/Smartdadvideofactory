@@ -18,6 +18,7 @@ import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, Chec
 import VideoTrimmer from "./video-trimmer";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 import type { Asset, ScriptPrompt } from "@shared/schema";
+import type { BuzzlyTimelineJson } from "@shared/models/timeline";
 
 interface Voice {
   voice_id: string;
@@ -191,11 +192,12 @@ interface SetupFormProps {
   initialPersonaPrompt?: string;
   initialVideoSource?: "edited" | "builder";
   studioVideoFiles?: File[];
+  studioTimelineJson?: BuzzlyTimelineJson | null;
   onOpenVideoBuilder?: () => void;
   onOpenExistingStudio?: (asset: Asset) => void;
 }
 
-export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], onOpenVideoBuilder, onOpenExistingStudio }: SetupFormProps) {
+export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName, initialPersonaPrompt, initialVideoSource, studioVideoFiles = [], studioTimelineJson = null, onOpenVideoBuilder, onOpenExistingStudio }: SetupFormProps) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [videoSource, setVideoSource] = useState<"builder">("builder");
@@ -507,7 +509,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
-            seoEnabled, seoPrompt: seoPrompt || null, seoModel,
+            seoEnabled, seoPrompt: seoPrompt || null, seoModel, timelineJson: studioTimelineJson,
           }),
         });
         if (!res.ok) {
@@ -588,7 +590,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
           captionEnabled, captionPrompt: captionPrompt || null, captionModel,
-          seoEnabled, seoPrompt: seoPrompt || null, seoModel,
+          seoEnabled, seoPrompt: seoPrompt || null, seoModel, timelineJson: studioTimelineJson,
         }),
       });
 

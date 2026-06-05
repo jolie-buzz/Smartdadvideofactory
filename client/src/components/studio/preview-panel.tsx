@@ -462,8 +462,13 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
                   }}
                 >
                   <video
+                    key={`${item.id}:${item.source.uri}:${item.trimStart}:${item.trimEnd}`}
                     ref={(element) => {
-                      videoRefs.current[item.id] = element;
+                      if (element) {
+                        videoRefs.current[item.id] = element;
+                      } else {
+                        delete videoRefs.current[item.id];
+                      }
                     }}
                     src={item.source.uri}
                     className="h-full w-full"

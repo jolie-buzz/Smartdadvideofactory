@@ -50,6 +50,7 @@ export const assets = pgTable("assets", {
   seoEnabled: boolean("seo_enabled").notNull().default(false),
   seoPrompt: text("seo_prompt"),
   seoModel: text("seo_model").notNull().default("gpt-4.1"),
+  timelineJson: jsonb("timeline_json").$type<Record<string, unknown> | null>(),
   userId: integer("user_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });

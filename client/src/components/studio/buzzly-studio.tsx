@@ -347,6 +347,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [activeShotEdit, setActiveShotEdit] = useState<GuidedShotSlot | null>(null);
   const [setupBuilderMode, setSetupBuilderMode] = useState(false);
   const [setupBuilderFiles, setSetupBuilderFiles] = useState<File[]>([]);
+  const [setupBuilderTimeline, setSetupBuilderTimeline] = useState<{ assetId: number | null; timeline: BuzzlyTimelineJson } | null>(null);
   const [libraryAssets, setLibraryAssets] = useState<StudioLibraryAsset[]>(() => (
     FREE_MUSIC_LIBRARY.map((track) => ({
       id: track.id,
@@ -744,13 +745,20 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       }
       const firstDuration = Math.max(0.15, splitOffset);
       const secondDuration = Math.max(0.5, selectedItem.duration - firstDuration);
+      const baseName = selectedItem.name.replace(/\s+(part\s+\d+|cut)+$/i, "").trim() || selectedItem.name;
+      const leftClip: BuzzlyTimelineItem = {
+        ...selectedItem,
+        name: `${baseName} part 1`,
+        duration: firstDuration,
+        trimEnd: Number((selectedItem.trimStart + firstDuration).toFixed(2)),
+      };
       const clone: BuzzlyTimelineItem = {
         ...selectedItem,
         id: `${selectedItem.id}-split-${Date.now()}`,
-        name: `${selectedItem.name} cut`,
-        startTime: selectedItem.startTime + firstDuration,
+        name: `${baseName} part 2`,
+        startTime: Number((selectedItem.startTime + firstDuration).toFixed(2)),
         duration: secondDuration,
-        trimStart: selectedItem.trimStart + firstDuration,
+        trimStart: Number((selectedItem.trimStart + firstDuration).toFixed(2)),
         trimEnd: selectedItem.trimEnd,
       };
 
@@ -763,13 +771,13 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           ...current,
           tracks: current.tracks.map((track) => ({
             ...track,
-            items: track.items.flatMap((item) => item.id === selectedItem.id ? [{ ...item, duration: firstDuration, trimEnd: item.trimStart + firstDuration }, clone] : [item]),
+            items: track.items.flatMap((item) => item.id === selectedItem.id ? [leftClip, clone] : [item]),
           })),
         };
         return isMainVideoItem ? sequenceMainVideoTrack(nextTimeline) : nextTimeline;
       });
       setSelectedItemId(clone.id);
-      seekTo(clone.startTime);
+      seekTo(Number((clone.startTime + 0.03).toFixed(2)));
       toast({ title: "Clip split", description: `${selectedItem.name} was split into two editable clips.` });
       return;
     }
@@ -847,6 +855,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     }
 
     const effectMap: Partial<Record<TimelineToolAction, NonNullable<BuzzlyTimelineItem["effectPreset"]>>> = {
+      "effect-none": "none",
       "effect-punch": "punch",
       "effect-vivid": "vivid",
       "effect-warm": "warm",
@@ -861,10 +870,11 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         toast({ title: "Select a visual clip", description: "Effects work on video or image clips." });
         return;
       }
-      const isActive = selectedItem.effectPreset === effectPreset;
+      const currentPreset = selectedItem.effectPreset || "none";
+      const isActive = currentPreset === effectPreset;
       updateItem(selectedItem.id, isActive ? effectPatchForPreset("none") : effectPatchForPreset(effectPreset));
       toast({
-        title: isActive ? "Effect removed" : `${effectLabel(effectPreset)} effect added`,
+        title: isActive || effectPreset === "none" ? "Effect removed" : `${effectLabel(effectPreset)} effect added`,
         description: `${selectedItem.name} visual style updated.`,
       });
       return;
@@ -1348,6 +1358,35 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const handleOpenSetupInStudio = async (asset: Asset, media?: AssetMediaUrls) => {
     if (!requirePermission("edit-project")) return;
     try {
+      if (setupBuilderTimeline?.assetId === asset.id) {
+        const restoredTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(setupBuilderTimeline.timeline));
+        const restoredItems = restoredTimeline.tracks.flatMap((track) => track.items);
+        setTimeline(restoredTimeline);
+        setEditingAsset(asset);
+        setSetupBuilderMode(true);
+        setSetupMode("form");
+        setSelectedItemId(restoredItems.find((item) => item.type === "video")?.id || restoredItems[0]?.id || null);
+        seekTo(0);
+        setActiveRail("studio");
+        toast({ title: "Reopened Studio edits", description: "Your current unsaved timeline edits are still here." });
+        return;
+      }
+
+      if (asset.timelineJson && typeof asset.timelineJson === "object") {
+        const savedTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(asset.timelineJson));
+        const savedItems = savedTimeline.tracks.flatMap((track) => track.items);
+        setTimeline(savedTimeline);
+        setSetupBuilderTimeline({ assetId: asset.id, timeline: savedTimeline });
+        setEditingAsset(asset);
+        setSetupBuilderMode(true);
+        setSetupMode("form");
+        setSelectedItemId(savedItems.find((item) => item.type === "video")?.id || savedItems[0]?.id || null);
+        seekTo(0);
+        setActiveRail("studio");
+        toast({ title: "Opened saved Studio timeline", description: `${asset.name} timeline edits were restored.` });
+        return;
+      }
+
       const mediaUrls = media ?? await fetch("/api/assets/media-urls", { credentials: "include" })
         .then((res) => {
           if (!res.ok) throw new Error("Could not load asset media URLs");
@@ -1759,16 +1798,24 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   };
 
   const openSetupVideoBuilder = () => {
-    const hasExistingBuilderDraft = setupBuilderFiles.length > 0;
+    const activeBuilderSnapshot = setupBuilderTimeline?.assetId === (editingAsset?.id ?? null) ? setupBuilderTimeline : null;
+    const hasExistingBuilderDraft = setupBuilderFiles.length > 0 || Boolean(activeBuilderSnapshot);
     setSetupBuilderMode(true);
     setSetupMode("form");
-    setSelectedItemId(null);
     seekTo(0);
-    if (!hasExistingBuilderDraft) {
+    if (activeBuilderSnapshot) {
+      const restoredTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(activeBuilderSnapshot.timeline));
+      const restoredItems = restoredTimeline.tracks.flatMap((track) => track.items);
+      setTimeline(restoredTimeline);
+      setSelectedItemId(restoredItems.find((item) => item.type === "video")?.id || restoredItems[0]?.id || null);
+    } else if (!hasExistingBuilderDraft) {
       setTimeline((current) => ({
         ...current,
         tracks: current.tracks.map((track) => ({ ...track, items: [] })),
       }));
+      setSelectedItemId(null);
+    } else {
+      setSelectedItemId(null);
     }
     setActiveRail("studio");
     toast({
@@ -1780,6 +1827,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   };
 
   const finishSetupVideoBuilder = () => {
+    setSetupBuilderTimeline({
+      assetId: editingAsset?.id ?? null,
+      timeline: JSON.parse(JSON.stringify(timeline)),
+    });
     setSetupBuilderMode(false);
     setSetupMode("form");
     setActiveRail("setup");
@@ -2204,6 +2255,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   onCreateSetup={() => {
                     setSetupBuilderMode(false);
                     setSetupBuilderFiles([]);
+                    setSetupBuilderTimeline(null);
                     setSetupMode("form");
                     navigateRail("setup");
                   }}
@@ -2596,6 +2648,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                 {[
                   ["Zoom in", "zoom-in-motion"],
                   ["Zoom out", "zoom-out-motion"],
+                  ["No effect", "effect-none"],
                   ["Punch", "effect-punch"],
                   ["Vivid", "effect-vivid"],
                   ["Cinema", "effect-cinematic"],
@@ -2851,6 +2904,7 @@ function StudioWorkflowPanel({
             initialPersonaPrompt={lastGuidedDraft ? buildGuidedSetupPrompt(lastGuidedDraft) : undefined}
             initialVideoSource={lastGuidedDraft || setupBuilderFiles.length > 0 ? "builder" : undefined}
             studioVideoFiles={setupBuilderFiles}
+            studioTimelineJson={setupBuilderTimeline?.assetId === (editingAsset?.id ?? null) ? setupBuilderTimeline.timeline : timeline}
             onOpenVideoBuilder={onOpenStudioBuilder}
             onOpenExistingStudio={onOpenSetupInStudio}
           />

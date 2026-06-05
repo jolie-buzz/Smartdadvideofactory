@@ -340,7 +340,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [mobileTimelineHeight, setMobileTimelineHeight] = useState(getInitialMobileTimelineHeight);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
-  const [setupMode, setSetupMode] = useState<"guided" | "form">("form");
+  const [setupMode, setSetupMode] = useState<"guided" | "form">(() => initialGoal ? "guided" : "form");
   const [hasGeneratedDraft, setHasGeneratedDraft] = useState(false);
   const [lastGuidedDraft, setLastGuidedDraft] = useState<GuidedSetupDraft | null>(null);
   const [guidedSetupState, setGuidedSetupState] = useState<GuidedSetupState>(() => createInitialGuidedSetupState());

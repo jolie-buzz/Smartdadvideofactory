@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Clock, ShieldX, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 hydrateCachedApiQueries();
 
@@ -90,11 +91,47 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <AuthenticatedApp />
+        <AppErrorBoundary>
+          <AuthenticatedApp />
+        </AppErrorBoundary>
         <PwaInstallPrompt />
       </TooltipProvider>
     </QueryClientProvider>
   );
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[app] Render failed", error, info);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <div className="min-h-screen bg-[#070a0f] px-4 py-10 text-white">
+        <div className="mx-auto max-w-md rounded-xl border border-white/10 bg-[#101620] p-5 shadow-2xl">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#ffc400]">Buzzly Studio</p>
+          <h1 className="mt-2 text-xl font-semibold">Something crashed while loading Studio.</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            Please reload once. If this keeps happening, send the error below.
+          </p>
+          <pre className="mt-4 max-h-48 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-red-200">
+            {this.state.error.message}
+          </pre>
+          <Button className="mt-4 w-full" onClick={() => window.location.reload()}>
+            Reload Studio
+          </Button>
+        </div>
+      </div>
+    );
+  }
 }
 
 export default App;

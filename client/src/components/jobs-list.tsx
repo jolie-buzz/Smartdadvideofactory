@@ -56,6 +56,12 @@ type JobWithAsset = {
   assetName?: string;
 };
 
+type DownloadState = {
+  status: "downloading" | "complete" | "error";
+  progress: number;
+  label: string;
+};
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {
   queued: { label: "Queued", color: "secondary", icon: Clock, progress: 5 },
   building_video: { label: "Building Video", color: "secondary", icon: Film, progress: 10 },
@@ -257,6 +263,7 @@ export function JobsList() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
 
@@ -278,19 +285,91 @@ export function JobsList() {
     (j) => !["done", "failed"].includes(j.status)
   );
 
-  const handleDownload = (jobId: number, type: "final" | "raw" | "clean") => {
+  const downloadKey = (jobId: number, type: "final" | "raw" | "clean") => `${jobId}:${type}`;
+
+  const filenameFromDisposition = (value: string | null, fallback: string) => {
+    const match = value?.match(/filename="?([^";]+)"?/i);
+    return match?.[1] || fallback;
+  };
+
+  const handleDownload = async (jobId: number, type: "final" | "raw" | "clean") => {
     const endpoint = type === "final"
       ? `/api/jobs/${jobId}/download`
       : type === "raw"
       ? `/api/jobs/${jobId}/download-audio-raw`
       : `/api/jobs/${jobId}/download-audio-clean`;
-    const link = document.createElement("a");
-    link.href = endpoint;
-    link.download = "";
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    const key = downloadKey(jobId, type);
+    const fallbackFilename = type === "final" ? `job-${jobId}-final.mp4` : `job-${jobId}-${type}.mp3`;
+
+    setDownloadStates((current) => ({
+      ...current,
+      [key]: { status: "downloading", progress: 1, label: "Starting download..." },
+    }));
+
+    try {
+      const res = await fetch(endpoint, { credentials: "include" });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+
+      const total = Number(res.headers.get("content-length") || 0);
+      const filename = filenameFromDisposition(res.headers.get("content-disposition"), fallbackFilename);
+      const reader = res.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let loaded = 0;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            loaded += value.length;
+            const progress = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 50;
+            const mbLoaded = (loaded / 1024 / 1024).toFixed(1);
+            const mbTotal = total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : " MB";
+            setDownloadStates((current) => ({
+              ...current,
+              [key]: {
+                status: "downloading",
+                progress,
+                label: `Downloading ${mbLoaded}${mbTotal}`,
+              },
+            }));
+          }
+        }
+      } else {
+        chunks.push(new Uint8Array(await res.arrayBuffer()));
+      }
+
+      const blob = new Blob(chunks, { type: res.headers.get("content-type") || (type === "final" ? "video/mp4" : "audio/mpeg") });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+
+      setDownloadStates((current) => ({
+        ...current,
+        [key]: { status: "complete", progress: 100, label: "Download complete" },
+      }));
+      toast({ title: "Download complete", description: `${filename} is ready on this device.` });
+      setTimeout(() => {
+        setDownloadStates((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      }, 5000);
+    } catch (err: any) {
+      setDownloadStates((current) => ({
+        ...current,
+        [key]: { status: "error", progress: 100, label: err.message || "Download failed" },
+      }));
+      toast({ title: "Download failed", description: err.message || "Please try again.", variant: "destructive" });
+    }
   };
 
   useEffect(() => {
@@ -451,6 +530,7 @@ export function JobsList() {
         const isActive = !["done", "failed"].includes(job.status);
         const isExpanded = expandedJobs.has(job.id);
         const hasContent = job.scriptText || job.headlineText || job.captionText || job.seoText || job.audioRawKey || job.audioCleanKey || job.logs;
+        const finalDownloadState = downloadStates[downloadKey(job.id, "final")];
 
         return (
           <Card key={job.id}>
@@ -488,9 +568,13 @@ export function JobsList() {
                       <Button
                         size="sm"
                         onClick={() => handleDownload(job.id, "final")}
+                        disabled={finalDownloadState?.status === "downloading"}
                         data-testid={`button-download-${job.id}`}
                       >
-                        <Download className="w-4 h-4 mr-1" /> Video
+                        {finalDownloadState?.status === "downloading"
+                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          : <Download className="w-4 h-4 mr-1" />}
+                        {finalDownloadState?.status === "downloading" ? "Downloading" : "Video"}
                       </Button>
                     </>
                   )}
@@ -520,6 +604,18 @@ export function JobsList() {
 
               {isActive && (
                 <Progress value={config.progress} className="h-1.5" data-testid={`progress-${job.id}`} />
+              )}
+
+              {finalDownloadState && (
+                <div className="rounded-md border bg-muted/40 p-3 space-y-2" data-testid={`download-progress-${job.id}`}>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className={finalDownloadState.status === "error" ? "text-destructive" : "text-muted-foreground"}>
+                      {finalDownloadState.label}
+                    </span>
+                    <span className="font-medium">{Math.round(finalDownloadState.progress)}%</span>
+                  </div>
+                  <Progress value={finalDownloadState.progress} className="h-2" />
+                </div>
               )}
 
               {isExpanded && hasContent && (

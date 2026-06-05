@@ -2243,6 +2243,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   lastGuidedDraft={lastGuidedDraft}
                   guidedSetupState={guidedSetupState}
                   setupBuilderFiles={setupBuilderFiles}
+                  studioTimelineJson={setupBuilderTimeline?.assetId === (editingAsset?.id ?? null) ? setupBuilderTimeline.timeline : timeline}
                   onGuidedSetupStateChange={setGuidedSetupState}
                   onRegisterAssetFiles={registerAssetFiles}
                   onOpenStudioBuilder={openSetupVideoBuilder}
@@ -2803,6 +2804,7 @@ function StudioWorkflowPanel({
   lastGuidedDraft,
   guidedSetupState,
   setupBuilderFiles,
+  studioTimelineJson,
   onGuidedSetupStateChange,
   onRegisterAssetFiles,
   onOpenStudioBuilder,
@@ -2824,6 +2826,7 @@ function StudioWorkflowPanel({
   lastGuidedDraft: GuidedSetupDraft | null;
   guidedSetupState: GuidedSetupState;
   setupBuilderFiles: File[];
+  studioTimelineJson: BuzzlyTimelineJson;
   onGuidedSetupStateChange: (state: GuidedSetupState) => void;
   onRegisterAssetFiles: (files: File[]) => void;
   onOpenStudioBuilder: () => void;
@@ -2904,7 +2907,7 @@ function StudioWorkflowPanel({
             initialPersonaPrompt={lastGuidedDraft ? buildGuidedSetupPrompt(lastGuidedDraft) : undefined}
             initialVideoSource={lastGuidedDraft || setupBuilderFiles.length > 0 ? "builder" : undefined}
             studioVideoFiles={setupBuilderFiles}
-            studioTimelineJson={setupBuilderTimeline?.assetId === (editingAsset?.id ?? null) ? setupBuilderTimeline.timeline : timeline}
+            studioTimelineJson={studioTimelineJson}
             onOpenVideoBuilder={onOpenStudioBuilder}
             onOpenExistingStudio={onOpenSetupInStudio}
           />

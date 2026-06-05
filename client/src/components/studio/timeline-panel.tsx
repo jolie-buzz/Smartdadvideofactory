@@ -95,6 +95,7 @@ const LEFT_COLUMN_WIDTH = 148;
 const DEFAULT_PIXELS_PER_SECOND = 75;
 const MIN_PIXELS_PER_SECOND = 1;
 const MAX_PIXELS_PER_SECOND = 300;
+const TIMELINE_MARKER_STEPS = [1, 2, 4, 6, 8, 10, 12, 15, 20, 30, 60];
 type TimelineThumbnail = {
   time: number;
   url: string;
@@ -288,7 +289,8 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const leftColumnWidth = isMobileTimeline ? 56 : LEFT_COLUMN_WIDTH;
   const playheadLeft = leftColumnWidth + clampNumber(currentTime * effectivePixelsPerSecond, 0, timelineWidth);
 
-  const markerStep = effectivePixelsPerSecond >= 120 ? 1 : effectivePixelsPerSecond >= 70 ? 2 : effectivePixelsPerSecond >= 28 ? 5 : effectivePixelsPerSecond >= 12 ? 10 : 15;
+  const markerTargetSpacing = isMobileTimeline ? 64 : 82;
+  const markerStep = TIMELINE_MARKER_STEPS.find((step) => step * effectivePixelsPerSecond >= markerTargetSpacing) || 60;
   const markers = Array.from(
     { length: Math.floor(timeline.project.duration / markerStep) + 1 },
     (_, index) => index * markerStep,

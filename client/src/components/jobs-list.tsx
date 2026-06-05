@@ -284,7 +284,13 @@ export function JobsList() {
       : type === "raw"
       ? `/api/jobs/${jobId}/download-audio-raw`
       : `/api/jobs/${jobId}/download-audio-clean`;
-    window.open(endpoint, "_blank");
+    const link = document.createElement("a");
+    link.href = endpoint;
+    link.download = "";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   useEffect(() => {

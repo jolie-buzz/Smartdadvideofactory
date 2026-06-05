@@ -56,7 +56,13 @@ const publicMediaUrlFromKey = (key?: string | null) => (
   key?.startsWith("public:") ? key.slice("public:".length) : null
 );
 
-const pipeR2Media = async (res: Response, key: string, range?: string, context?: { assetId: number; kind: string }) => {
+const pipeR2Media = async (
+  res: Response,
+  key: string,
+  range?: string,
+  context?: { assetId: number; kind: string },
+  disposition?: { type: "inline" | "attachment"; filename?: string },
+) => {
   const result = await getR2ObjectStream(key, range);
   if (!result.Body) {
     throw new Error("R2 returned an empty media body");
@@ -70,7 +76,9 @@ const pipeR2Media = async (res: Response, key: string, range?: string, context?:
     ? result.ContentType
     : contentTypeFromKey(key);
   res.setHeader("Content-Type", contentType);
-  res.setHeader("Content-Disposition", "inline");
+  const dispositionType = disposition?.type || "inline";
+  const filename = disposition?.filename?.replace(/["\r\n]/g, "") || key.split("/").pop() || "download";
+  res.setHeader("Content-Disposition", dispositionType === "attachment" ? `attachment; filename="${filename}"` : "inline");
   if (result.ContentLength !== undefined) res.setHeader("Content-Length", String(result.ContentLength));
   if (result.ContentRange) res.setHeader("Content-Range", result.ContentRange);
   console.info("[media] R2 stream ok", {
@@ -892,8 +900,10 @@ export async function registerRoutes(
       const job = await storage.getJob(parseInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (!job.finalVideoKey) return res.status(400).json({ error: "Final video not yet available" });
-      const url = await getSignedDownloadUrl(job.finalVideoKey, `job-${job.id}-final.mp4`);
-      res.redirect(url);
+      await pipeR2Media(res, job.finalVideoKey, undefined, { assetId: job.assetId, kind: "job-final-download" }, {
+        type: "attachment",
+        filename: `job-${job.id}-final.mp4`,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1019,8 +1029,10 @@ export async function registerRoutes(
       if (!job.finalVideoKey) {
         return res.status(404).send("Video not yet available.");
       }
-      const url = await getSignedDownloadUrl(job.finalVideoKey, `video-${job.id}.mp4`);
-      res.redirect(url);
+      await pipeR2Media(res, job.finalVideoKey, undefined, { assetId: job.assetId, kind: "shared-final-download" }, {
+        type: "attachment",
+        filename: `video-${job.id}.mp4`,
+      });
     } catch (err: any) {
       res.status(500).send("Error generating download link.");
     }

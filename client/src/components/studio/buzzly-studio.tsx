@@ -280,6 +280,81 @@ const hydrateTimelineMediaSources = (timeline: BuzzlyTimelineJson): BuzzlyTimeli
   })),
 });
 
+const extractR2KeyFromMediaUri = (uri?: string) => {
+  if (!uri) return undefined;
+  try {
+    const url = new URL(uri, window.location.origin);
+    if (url.pathname === "/api/media/r2") {
+      return url.searchParams.get("key") || undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const isBrowserOnlyMediaUri = (uri?: string) => (
+  Boolean(uri && (
+    uri.startsWith("blob:")
+    || uri.startsWith("data:")
+    || uri.startsWith("file:")
+  ))
+);
+
+const normalizeTimelineForRender = (timeline: BuzzlyTimelineJson, asset: Asset): { timeline: BuzzlyTimelineJson; error?: string } => {
+  const nextTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(timeline));
+  const recoveredVideoKey = asset.videoKey || undefined;
+
+  for (const track of nextTimeline.tracks) {
+    track.items = track.items.map((item) => {
+      if (item.type !== "video") return item;
+
+      const source = item.source || { kind: "remote" as const };
+      const existingR2Key = source.r2Key || (item as any).r2Key || extractR2KeyFromMediaUri(source.uri);
+      const matchedAssetVideo = source.uri?.includes(`/api/assets/${asset.id}/media/video`) ? recoveredVideoKey : undefined;
+      const renderableR2Key = existingR2Key || matchedAssetVideo || recoveredVideoKey;
+
+      if (!renderableR2Key) return item;
+
+      return {
+        ...item,
+        source: {
+          ...source,
+          kind: source.kind === "local" ? "remote" : source.kind,
+          r2Key: renderableR2Key,
+          uri: stableR2MediaUrl(renderableR2Key) || source.uri,
+          filename: source.filename || renderableR2Key.split("/").pop() || renderableR2Key,
+          mimeType: source.mimeType || mimeTypeFromKey(renderableR2Key, "video/mp4"),
+        },
+      };
+    });
+  }
+
+  const browserOnlyClip = nextTimeline.tracks
+    .flatMap((track) => track.items)
+    .find((item) => item.type === "video" && !item.source?.r2Key && isBrowserOnlyMediaUri(item.source?.uri));
+
+  if (browserOnlyClip) {
+    return {
+      timeline: nextTimeline,
+      error: "This clip is only available in browser preview. Please re-upload or recover media before rendering.",
+    };
+  }
+
+  const missingRenderableClip = nextTimeline.tracks
+    .flatMap((track) => track.items)
+    .find((item) => item.type === "video" && !item.source?.r2Key);
+
+  if (missingRenderableClip) {
+    return {
+      timeline: nextTimeline,
+      error: "This clip is missing its saved media file. Please re-upload or recover media before rendering.",
+    };
+  }
+
+  return { timeline: nextTimeline };
+};
+
 const moveMainVideoClipWithRipple = (timeline: BuzzlyTimelineJson, id: string, desiredStartTime: number): BuzzlyTimelineJson => {
   let didMoveSequenceClip = false;
   const nextTracks = timeline.tracks.map((track) => {
@@ -1763,11 +1838,17 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
 
     setStudioRendering(true);
     try {
+      const normalized = normalizeTimelineForRender(timeline, editingAsset);
+      if (normalized.error) {
+        throw new Error(normalized.error);
+      }
+      setTimeline(normalized.timeline);
+
       const res = await fetch(`/api/assets/${editingAsset.id}/render-studio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ timelineJson: timeline }),
+        body: JSON.stringify({ timelineJson: normalized.timeline }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1775,9 +1856,9 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       }
 
       setEditingAsset((current) => (
-        current && current.id === editingAsset.id ? { ...current, videoKey: data.videoKey || current.videoKey, timelineJson: timeline as any } : current
+        current && current.id === editingAsset.id ? { ...current, videoKey: data.videoKey || current.videoKey, timelineJson: normalized.timeline as any } : current
       ));
-      setSetupBuilderTimeline({ assetId: editingAsset.id, timeline: JSON.parse(JSON.stringify(timeline)) });
+      setSetupBuilderTimeline({ assetId: editingAsset.id, timeline: JSON.parse(JSON.stringify(normalized.timeline)) });
       toast({
         title: "Studio rendered",
         description: "Rendered video is now the source for Generate and Video Analysis.",

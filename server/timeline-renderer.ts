@@ -15,6 +15,7 @@ type TimelineItem = {
   id: string;
   type: string;
   name?: string;
+  r2Key?: string;
   source?: TimelineSource;
   startTime?: number;
   duration?: number;
@@ -86,19 +87,52 @@ const itemCanUseAssetVideo = (item: TimelineItem, assetId: number, assetVideoKey
 
 const getRenderableSourceKey = (item: TimelineItem, assetId: number, assetVideoKey?: string | null) => {
   if (item.source?.r2Key) return item.source.r2Key;
+  if (item.r2Key) return item.r2Key;
+  if (item.type === "video" && assetVideoKey) return assetVideoKey;
   if (itemCanUseAssetVideo(item, assetId, assetVideoKey)) return assetVideoKey || undefined;
   return undefined;
 };
 
+const getTimelineItems = (timelineJson: TimelineJson) => (
+  (timelineJson.tracks || []).flatMap((track) => track.items || [])
+);
+
+const logTimelineRenderInputs = (assetId: number, timelineJson: TimelineJson, assetVideoKey?: string | null) => {
+  const timelineItems = getTimelineItems(timelineJson);
+  const videoItems = timelineItems.filter((item) => item.type === "video");
+  console.info("[studio-render] timeline scan", {
+    assetId,
+    timelineClipCount: timelineItems.length,
+    videoClipCount: videoItems.length,
+    hasAssetVideoKey: Boolean(assetVideoKey),
+    videoClips: videoItems.map((item) => ({
+      id: item.id,
+      name: item.name || null,
+      hasSourceUri: Boolean(item.source?.uri),
+      hasSourceR2Key: Boolean(item.source?.r2Key),
+      hasTopLevelR2Key: Boolean(item.r2Key),
+      hasAssetVideoKey: Boolean(assetVideoKey),
+      sourceUriKind: item.source?.uri?.startsWith("blob:")
+        ? "blob"
+        : item.source?.uri?.startsWith("/api/media/r2")
+          ? "r2-media-endpoint"
+          : item.source?.uri
+            ? "other"
+            : "missing",
+      renderable: Boolean(getRenderableSourceKey(item, assetId, assetVideoKey)),
+    })),
+  });
+};
+
 const getTimelineVideoItems = (timelineJson: TimelineJson, assetId: number, assetVideoKey?: string | null) => (
-  (timelineJson.tracks || [])
-    .flatMap((track) => track.items || [])
+  getTimelineItems(timelineJson)
     .filter((item) => item.type === "video" && Boolean(getRenderableSourceKey(item, assetId, assetVideoKey)))
     .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
 );
 
 export async function renderTimelineVideo(assetId: number, timelineJson: TimelineJson): Promise<string> {
   const asset = await storage.getAsset(assetId);
+  logTimelineRenderInputs(assetId, timelineJson, asset?.videoKey);
   const videoItems = getTimelineVideoItems(timelineJson, assetId, asset?.videoKey);
   if (videoItems.length === 0) {
     throw new Error("No renderable Studio timeline video clips found");

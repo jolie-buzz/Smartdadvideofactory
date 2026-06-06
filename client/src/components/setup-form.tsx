@@ -58,6 +58,7 @@ type VideoAnalysisStatus = {
   canAnalyze: boolean;
   analysisVersion: string;
   modelUsed: string;
+  availableModels?: Array<{ id: string; name: string }>;
   analysis: {
     id: number;
     videoHash: string;
@@ -369,6 +370,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   });
 
   const [libraryPickerKey, setLibraryPickerKey] = useState(0);
+  const [videoAnalysisModel, setVideoAnalysisModel] = useState("gpt-4o");
   const scriptPromptsQuery = useQuery<ScriptPrompt[]>({
     queryKey: ["/api/script-prompts"],
   });
@@ -386,9 +388,18 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
   const videoAnalysis = videoAnalysisQuery.data?.analysis;
   const videoAnalysisJson = videoAnalysis?.analysisJson || null;
+  const videoAnalysisModels = videoAnalysisQuery.data?.availableModels?.length
+    ? videoAnalysisQuery.data.availableModels
+    : OPENAI_MODELS;
   const uploadedMusicOptions = (assetsQuery.data || [])
     .filter((asset) => asset.musicKey)
     .map((asset) => ({ key: asset.musicKey!, label: asset.name }));
+
+  useEffect(() => {
+    if (videoAnalysisQuery.data?.modelUsed) {
+      setVideoAnalysisModel(videoAnalysisQuery.data.modelUsed);
+    }
+  }, [videoAnalysisQuery.data?.modelUsed]);
 
   const handleUploadSource = async (file: File) => {
     setSourceUploading(true);
@@ -808,7 +819,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       const res = await fetch(`/api/assets/${editingAsset.id}/video-analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({ force: true, model: videoAnalysisModel }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -1133,6 +1144,28 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                         Re-analyze video
                       </Button>
                     </div>
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
+                    <div className="space-y-2">
+                      <Label htmlFor="video-analysis-model">Video analysis model</Label>
+                      <Select value={videoAnalysisModel} onValueChange={setVideoAnalysisModel}>
+                        <SelectTrigger id="video-analysis-model" data-testid="select-video-analysis-model">
+                          <SelectValue placeholder="Choose model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {videoAnalysisModels.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {videoAnalysis && videoAnalysis.modelUsed !== videoAnalysisModel && (
+                      <Badge variant="outline" className="w-fit">
+                        Re-analyze to use {videoAnalysisModel}
+                      </Badge>
+                    )}
                   </div>
                   {videoAnalysis && (
                     <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">

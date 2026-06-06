@@ -97,6 +97,19 @@ const pipeR2Media = async (
 
 const queuedVideoAnalysisAssetIds = new Set<number>();
 const queuedStudioRenderAssetIds = new Set<number>();
+const VIDEO_ANALYSIS_MODEL_OPTIONS = [
+  { id: "gpt-4o", name: "GPT-4o (recommended vision)" },
+  { id: "gpt-4.1", name: "GPT-4.1" },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini (faster, cheaper)" },
+  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
+];
+
+const normalizeVideoAnalysisModel = (model?: unknown) => {
+  const requested = typeof model === "string" ? model.trim() : "";
+  return VIDEO_ANALYSIS_MODEL_OPTIONS.some((option) => option.id === requested)
+    ? requested
+    : VIDEO_ANALYSIS_MODEL;
+};
 
 const renderStudioTimelineForAsset = async (asset: { id: number; timelineJson?: unknown; name?: string | null }, reason: string) => {
   if (!asset.timelineJson || typeof asset.timelineJson !== "object") return null;
@@ -177,7 +190,7 @@ const timelineContainsR2Key = (timelineJson: unknown, key: string) => {
   const tracks = Array.isArray((timelineJson as any).tracks) ? (timelineJson as any).tracks : [];
   return tracks.some((track: any) => (
     Array.isArray(track?.items)
-    && track.items.some((item: any) => item?.source?.r2Key === key)
+    && track.items.some((item: any) => item?.source?.r2Key === key || item?.r2Key === key)
   ));
 };
 
@@ -717,6 +730,7 @@ export async function registerRoutes(
         canAnalyze: Boolean(asset.videoKey || shotsList.length > 0),
         analysisVersion: latest?.analysisVersion || VIDEO_ANALYSIS_VERSION,
         modelUsed: latest?.modelUsed || VIDEO_ANALYSIS_MODEL,
+        availableModels: VIDEO_ANALYSIS_MODEL_OPTIONS,
         analysis: latest ? {
           id: latest.id,
           videoHash: latest.videoHash,
@@ -752,6 +766,7 @@ export async function registerRoutes(
         : asset;
       const result = await ensureVideoAnalysisForAsset(renderedAsset || asset, {
         force: Boolean(req.body?.force),
+        model: normalizeVideoAnalysisModel(req.body?.model),
         timelineJson: (renderedAsset || asset).timelineJson as any,
       });
       res.json({

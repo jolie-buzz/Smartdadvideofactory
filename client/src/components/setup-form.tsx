@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors, Eye } from "lucide-react";
 import VideoTrimmer from "./video-trimmer";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 import type { Asset, ScriptPrompt } from "@shared/schema";
@@ -51,6 +51,22 @@ type AssetMediaUrls = {
   photoUrl: string | null;
   videoUrl: string | null;
   musicUrl: string | null;
+};
+
+type VideoAnalysisStatus = {
+  status: "ready" | "missing";
+  canAnalyze: boolean;
+  analysisVersion: string;
+  modelUsed: string;
+  analysis: {
+    id: number;
+    videoHash: string;
+    analysisJson: Record<string, unknown>;
+    modelUsed: string;
+    analysisVersion: string;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
 };
 
 const MAX_FILE_SIZE_MB = 150;
@@ -253,6 +269,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [replaceVideoProgress, setReplaceVideoProgress] = useState(0);
   const [replaceMusicUploading, setReplaceMusicUploading] = useState(false);
   const [replaceMusicProgress, setReplaceMusicProgress] = useState(0);
+  const [showVideoAnalysis, setShowVideoAnalysis] = useState(false);
+  const [reanalyzingVideo, setReanalyzingVideo] = useState(false);
   const replacePhotoInputRef = useRef<HTMLInputElement>(null);
   const replaceVideoInputRef = useRef<HTMLInputElement>(null);
   const replaceMusicInputRef = useRef<HTMLInputElement>(null);
@@ -358,10 +376,16 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     queryKey: ["/api/assets/media-urls"],
     enabled: !!editingAsset,
   });
+  const videoAnalysisQuery = useQuery<VideoAnalysisStatus>({
+    queryKey: [`/api/assets/${editingAsset?.id}/video-analysis`],
+    enabled: !!editingAsset,
+  });
   const assetsQuery = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
   });
   const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
+  const videoAnalysis = videoAnalysisQuery.data?.analysis;
+  const videoAnalysisJson = videoAnalysis?.analysisJson || null;
   const uploadedMusicOptions = (assetsQuery.data || [])
     .filter((asset) => asset.musicKey)
     .map((asset) => ({ key: asset.musicKey!, label: asset.name }));
@@ -777,6 +801,29 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     }
   };
 
+  const handleReanalyzeVideo = async () => {
+    if (!editingAsset || reanalyzingVideo) return;
+    setReanalyzingVideo(true);
+    try {
+      const res = await fetch(`/api/assets/${editingAsset.id}/video-analysis`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Video analysis failed (${res.status})`);
+      }
+      await queryClient.invalidateQueries({ queryKey: [`/api/assets/${editingAsset.id}/video-analysis`] });
+      setShowVideoAnalysis(true);
+      toast({ title: "Video analysis ready", description: "Buzzly saved fresh visual intelligence for this setup." });
+    } catch (err: any) {
+      toast({ title: "Analysis error", description: err.message, variant: "destructive" });
+    } finally {
+      setReanalyzingVideo(false);
+    }
+  };
+
   const canSave = isEditing
     ? name && personaPrompt && voiceId
     : name && personaPrompt && photo && (pendingShots.length > 0 || studioVideoFiles.length > 0) && voiceId;
@@ -1051,6 +1098,62 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     <p className="text-xs text-muted-foreground">Uploading new video... {replaceVideoProgress}%</p>
                   </div>
                 )}
+                <div className="space-y-3 rounded-lg border bg-background/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Brain className="h-4 w-4 text-primary" />
+                        Video Analysis: {videoAnalysisQuery.isLoading ? "Checking" : videoAnalysis ? "Ready" : "Missing"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Use this analysis for script, captions, sound effects, and transitions.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowVideoAnalysis((value) => !value)}
+                        disabled={!videoAnalysis}
+                        data-testid="button-view-video-analysis"
+                      >
+                        <Eye className="h-4 w-4" />
+                        View analysis
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleReanalyzeVideo}
+                        disabled={reanalyzingVideo || !videoAnalysisQuery.data?.canAnalyze}
+                        data-testid="button-reanalyze-video"
+                      >
+                        {reanalyzingVideo ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        Re-analyze video
+                      </Button>
+                    </div>
+                  </div>
+                  {videoAnalysis && (
+                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                      <Badge variant="secondary">{videoAnalysis.modelUsed}</Badge>
+                      <Badge variant="outline">{videoAnalysis.analysisVersion}</Badge>
+                      <span>Updated {new Date(videoAnalysis.updatedAt).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {showVideoAnalysis && videoAnalysisJson && (
+                    <div className="max-h-72 overflow-auto rounded-md bg-muted p-3 text-xs">
+                      <pre className="whitespace-pre-wrap font-mono">
+                        {JSON.stringify(videoAnalysisJson, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {!videoAnalysis && videoAnalysisQuery.data?.canAnalyze && (
+                    <p className="text-xs text-muted-foreground">
+                      No saved analysis yet. Click Re-analyze video once, then future generations can reuse it.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">

@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream, getR2ConfigStatus } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
+import { ensureVideoAnalysisForAsset, VIDEO_ANALYSIS_MODEL, VIDEO_ANALYSIS_VERSION } from "./video-intelligence";
 import { requireAuth, requireAdmin, hashPassword } from "./auth";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
@@ -91,6 +92,39 @@ const pipeR2Media = async (
     key,
   });
   (result.Body as NodeJS.ReadableStream).pipe(res);
+};
+
+const queuedVideoAnalysisAssetIds = new Set<number>();
+
+const queueVideoAnalysisForAsset = (asset: { id: number; name?: string | null }, reason: string) => {
+  if (queuedVideoAnalysisAssetIds.has(asset.id)) return;
+  queuedVideoAnalysisAssetIds.add(asset.id);
+  storage.getAsset(asset.id)
+    .then((freshAsset) => {
+      if (!freshAsset) return null;
+      return ensureVideoAnalysisForAsset(freshAsset);
+    })
+    .then((result) => {
+      if (!result) return;
+      console.info("[video-analysis] ready", {
+        assetId: asset.id,
+        assetName: asset.name || null,
+        reason,
+        reused: result.reused,
+        source: result.source,
+      });
+    })
+    .catch((err) => {
+      console.warn("[video-analysis] background analysis failed", {
+        assetId: asset.id,
+        assetName: asset.name || null,
+        reason,
+        error: err?.message || String(err),
+      });
+    })
+    .finally(() => {
+      queuedVideoAnalysisAssetIds.delete(asset.id);
+    });
 };
 
 function runRouteFfmpeg(args: string[], timeoutMs = 300_000): Promise<void> {
@@ -375,6 +409,7 @@ export async function registerRoutes(
         userId: req.user!.id,
       });
 
+      if (asset.videoKey) queueVideoAnalysisForAsset(asset, "setup-created");
       res.status(201).json(asset);
     } catch (err: any) {
       console.error("Setup error:", err);
@@ -446,7 +481,22 @@ export async function registerRoutes(
       if (publicUrl) return res.redirect(302, publicUrl);
 
       const range = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
-      await pipeR2Media(res, key, range, { assetId: asset.id, kind });
+      const forceDownload = req.query.download === "1" || req.query.download === "true";
+      const extension =
+        kind === "photo" ? path.extname(key) || ".jpg" :
+        kind === "music" ? path.extname(key) || ".mp3" :
+        path.extname(key) || ".mp4";
+      const safeName = `${asset.name || `asset-${asset.id}`}-${kind}`
+        .replace(/[^a-z0-9-_]+/gi, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLowerCase();
+      await pipeR2Media(
+        res,
+        key,
+        forceDownload ? undefined : range,
+        { assetId: asset.id, kind },
+        forceDownload ? { type: "attachment", filename: `${safeName || `asset-${asset.id}-${kind}`}${extension}` } : undefined,
+      );
     } catch (err: any) {
       console.error("[media] asset stream failed", {
         assetId,
@@ -508,6 +558,7 @@ export async function registerRoutes(
       if (timelineJson !== undefined) updateData.timelineJson = timelineJson;
 
       const updated = await storage.updateAsset(id, updateData);
+      if (updated && videoKey !== undefined && videoKey) queueVideoAnalysisForAsset(updated, "video-replaced");
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -556,6 +607,66 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("Duplicate error:", err);
       res.status(500).json({ error: err.message || "Failed to duplicate setup" });
+    }
+  });
+
+  app.get("/api/assets/:id/video-analysis", requireAuth, async (req, res) => {
+    try {
+      const assetId = parseInt(String(req.params.id));
+      const asset = await storage.getAsset(assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (req.user!.role !== "admin" && asset.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const latest = await storage.getLatestVideoAnalysisForAsset(asset.id);
+      const shotsList = await storage.getShots(asset.id);
+      res.json({
+        status: latest ? "ready" : "missing",
+        canAnalyze: Boolean(asset.videoKey || shotsList.length > 0),
+        analysisVersion: latest?.analysisVersion || VIDEO_ANALYSIS_VERSION,
+        modelUsed: latest?.modelUsed || VIDEO_ANALYSIS_MODEL,
+        analysis: latest ? {
+          id: latest.id,
+          videoHash: latest.videoHash,
+          analysisJson: latest.analysisJson,
+          modelUsed: latest.modelUsed,
+          analysisVersion: latest.analysisVersion,
+          createdAt: latest.createdAt,
+          updatedAt: latest.updatedAt,
+        } : null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load video analysis" });
+    }
+  });
+
+  app.post("/api/assets/:id/video-analysis", requireAuth, async (req, res) => {
+    try {
+      const assetId = parseInt(String(req.params.id));
+      const asset = await storage.getAsset(assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (req.user!.role !== "admin" && asset.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const result = await ensureVideoAnalysisForAsset(asset, { force: Boolean(req.body?.force) });
+      res.json({
+        status: "ready",
+        reused: result.reused,
+        source: result.source,
+        analysis: {
+          id: result.analysis.id,
+          videoHash: result.analysis.videoHash,
+          analysisJson: result.analysis.analysisJson,
+          modelUsed: result.analysis.modelUsed,
+          analysisVersion: result.analysis.analysisVersion,
+          createdAt: result.analysis.createdAt,
+          updatedAt: result.analysis.updatedAt,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to analyze video" });
     }
   });
 
@@ -1234,6 +1345,7 @@ export async function registerRoutes(
         filename: filename || null,
       });
 
+      queueVideoAnalysisForAsset(asset, "shot-uploaded");
       res.status(201).json(shot);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

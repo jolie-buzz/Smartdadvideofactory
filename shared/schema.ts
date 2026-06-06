@@ -87,6 +87,21 @@ export const shots = pgTable("shots", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const videoAnalyses = pgTable("video_analysis", {
+  id: serial("id").primaryKey(),
+  videoAssetId: integer("video_asset_id").notNull().references(() => assets.id),
+  videoHash: text("video_hash").notNull(),
+  analysisJson: jsonb("analysis_json").$type<Record<string, unknown>>().notNull(),
+  modelUsed: text("model_used").notNull(),
+  analysisVersion: text("analysis_version").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  index("idx_video_analysis_asset_id").on(table.videoAssetId),
+  index("idx_video_analysis_hash").on(table.videoHash),
+  index("idx_video_analysis_version_model").on(table.analysisVersion, table.modelUsed),
+]);
+
 export const scriptPrompts = pgTable("script_prompts", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
@@ -125,6 +140,12 @@ export const insertShotSchema = createInsertSchema(shots).omit({
   createdAt: true,
 });
 
+export const insertVideoAnalysisSchema = createInsertSchema(videoAnalyses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertVariantSchema = createInsertSchema(variants).omit({
   id: true,
   createdAt: true,
@@ -143,6 +164,8 @@ export type Job = typeof jobs.$inferSelect;
 export type InsertJob = z.infer<typeof insertJobSchema>;
 export type Shot = typeof shots.$inferSelect;
 export type InsertShot = z.infer<typeof insertShotSchema>;
+export type VideoAnalysis = typeof videoAnalyses.$inferSelect;
+export type InsertVideoAnalysis = z.infer<typeof insertVideoAnalysisSchema>;
 export type Variant = typeof variants.$inferSelect;
 export type InsertVariant = z.infer<typeof insertVariantSchema>;
 export type ScriptPrompt = typeof scriptPrompts.$inferSelect;

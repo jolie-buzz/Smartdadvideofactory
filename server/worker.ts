@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { renderTimelineVideo } from "./timeline-renderer";
+import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt } from "./video-intelligence";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
@@ -87,7 +88,7 @@ async function getMusicInput(musicKey: string | null): Promise<string | null> {
   return getSignedDownloadUrl(musicKey);
 }
 
-async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null): Promise<string> {
+async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null, videoAnalysisSummary?: string): Promise<string> {
   let systemMessage = `You are a Buzzly video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
 
 IMPORTANT: The script MUST be short enough to be narrated in 45 seconds or less when read aloud at a natural pace. Aim for 80-100 words total.
@@ -105,6 +106,10 @@ Rules:
 - No stage directions or notes
 - If a product image is provided, use the visible product details, branding, text, and features from the image to make the script accurate and specific`;
 
+  if (videoAnalysisSummary) {
+    systemMessage += `\n- If reusable video analysis is provided, use the visible actions, pacing, OCR text, benefits, suggested hooks, and important moments from that analysis.`;
+  }
+
   if (excludedWords && excludedWords.trim()) {
     systemMessage += `\n\nIMPORTANT — NEVER use any of the following words or phrases anywhere in the script: ${excludedWords.trim()}`;
   }
@@ -120,7 +125,9 @@ Rules:
 
   userContent.push({
     type: "text",
-    text: personaPrompt,
+    text: videoAnalysisSummary
+      ? `${personaPrompt}\n\nReusable Video Intelligence Analysis:\n${videoAnalysisSummary}`
+      : personaPrompt,
   });
 
   const response = await getLlmClient().chat.completions.create({
@@ -610,7 +617,19 @@ async function processJob(jobId: number): Promise<void> {
       await storage.appendJobLog(jobId, "Applying excluded words filter");
     }
 
-    const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords));
+    let videoAnalysisSummary = "";
+    try {
+      await storage.appendJobLog(jobId, "Checking reusable video analysis cache...");
+      const videoAnalysisResult = await ensureVideoAnalysisForAsset(asset);
+      videoAnalysisSummary = summarizeVideoAnalysisForPrompt(videoAnalysisResult.analysis);
+      await storage.appendJobLog(jobId, videoAnalysisResult.reused
+        ? "Video analysis reused from saved cache."
+        : "Video analysis created from extracted keyframes and saved.");
+    } catch (err: any) {
+      await storage.appendJobLog(jobId, `Warning: Video analysis unavailable: ${err.message}. Continuing with product photo and prompt.`);
+    }
+
+    const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords, videoAnalysisSummary));
     if (!scriptText) throw new Error("Generated script was empty after removing non-narration sections");
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);

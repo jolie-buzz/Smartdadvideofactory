@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { users, assets, jobs, shots, variants, scriptPrompts, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant, type ScriptPrompt, type InsertScriptPrompt } from "@shared/schema";
+import { users, assets, jobs, shots, variants, scriptPrompts, videoAnalyses, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant, type ScriptPrompt, type InsertScriptPrompt, type VideoAnalysis, type InsertVideoAnalysis } from "@shared/schema";
 import { eq, desc, inArray, and, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -29,6 +29,9 @@ export interface IStorage {
   getShot(id: number): Promise<Shot | undefined>;
   getShotsByIds(ids: number[]): Promise<Shot[]>;
   deleteShot(id: number): Promise<void>;
+  createVideoAnalysis(data: InsertVideoAnalysis): Promise<VideoAnalysis>;
+  getLatestVideoAnalysisForAsset(assetId: number): Promise<VideoAnalysis | undefined>;
+  getVideoAnalysisByHash(videoHash: string, analysisVersion: string, modelUsed: string): Promise<VideoAnalysis | undefined>;
   createVariant(variant: InsertVariant): Promise<Variant>;
   getVariants(assetId: number): Promise<Variant[]>;
   getVariant(id: number): Promise<Variant | undefined>;
@@ -185,6 +188,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteShot(id: number): Promise<void> {
     await db.delete(shots).where(eq(shots.id, id));
+  }
+
+  async createVideoAnalysis(data: InsertVideoAnalysis): Promise<VideoAnalysis> {
+    const [result] = await db.insert(videoAnalyses).values(data).returning();
+    return result;
+  }
+
+  async getLatestVideoAnalysisForAsset(assetId: number): Promise<VideoAnalysis | undefined> {
+    const [result] = await db
+      .select()
+      .from(videoAnalyses)
+      .where(eq(videoAnalyses.videoAssetId, assetId))
+      .orderBy(desc(videoAnalyses.updatedAt), desc(videoAnalyses.createdAt));
+    return result;
+  }
+
+  async getVideoAnalysisByHash(videoHash: string, analysisVersion: string, modelUsed: string): Promise<VideoAnalysis | undefined> {
+    const [result] = await db
+      .select()
+      .from(videoAnalyses)
+      .where(and(
+        eq(videoAnalyses.videoHash, videoHash),
+        eq(videoAnalyses.analysisVersion, analysisVersion),
+        eq(videoAnalyses.modelUsed, modelUsed),
+      ))
+      .orderBy(desc(videoAnalyses.updatedAt), desc(videoAnalyses.createdAt));
+    return result;
   }
 
   async createVariant(variant: InsertVariant): Promise<Variant> {

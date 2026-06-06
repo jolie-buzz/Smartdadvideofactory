@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star, Download, Music } from "lucide-react";
 import { useState } from "react";
 import type { Asset } from "@shared/schema";
 
@@ -141,6 +141,16 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     },
   });
 
+  const downloadRecoveredMedia = (asset: Asset, kind: "photo" | "video" | "music") => {
+    const link = document.createElement("a");
+    link.href = `/api/assets/${asset.id}/media/${kind}?download=1`;
+    link.download = `${asset.name}-${kind}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    toast({ title: "Download started", description: `${kind[0].toUpperCase()}${kind.slice(1)} is downloading.` });
+  };
+
   if (assetsQuery.isLoading) {
     return (
       <div className="max-w-2xl mx-auto space-y-4">
@@ -184,6 +194,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
 
       {[...assetsQuery.data].sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite)).map((asset, index) => {
         const media = mediaUrlsQuery.data?.[asset.id];
+        const isRecovered = asset.name.startsWith("Recovered Asset ");
         return (
         <Card key={asset.id}>
           <CardContent className="p-5">
@@ -219,7 +230,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   >
                     <Star className={`h-4 w-4 ${asset.isFavorite ? "fill-current" : ""}`} />
                   </Button>
-                  {asset.name.startsWith("Recovered Asset ") && (
+                  {isRecovered && (
                     <Badge variant="outline" className="text-xs">Recovered</Badge>
                   )}
                   {asset.voiceName && (
@@ -253,6 +264,53 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                     {new Date(asset.createdAt).toLocaleDateString()}
                   </span>
                 </div>
+
+                {isRecovered && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {asset.photoKey && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1.5"
+                        onClick={() => downloadRecoveredMedia(asset, "photo")}
+                        data-testid={`button-download-recovered-photo-${asset.id}`}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <Image className="h-3.5 w-3.5" />
+                        Photo
+                      </Button>
+                    )}
+                    {asset.videoKey && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1.5"
+                        onClick={() => downloadRecoveredMedia(asset, "video")}
+                        data-testid={`button-download-recovered-video-${asset.id}`}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <Film className="h-3.5 w-3.5" />
+                        Video
+                      </Button>
+                    )}
+                    {asset.musicKey && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1.5"
+                        onClick={() => downloadRecoveredMedia(asset, "music")}
+                        data-testid={`button-download-recovered-music-${asset.id}`}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <Music className="h-3.5 w-3.5" />
+                        Music
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 shrink-0 max-sm:w-full max-sm:flex-wrap">

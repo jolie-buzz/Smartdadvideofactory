@@ -5,6 +5,7 @@ import { writeFile, unlink, readFile } from "fs/promises";
 import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
+import ffmpegStatic from "ffmpeg-static";
 
 export const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -61,7 +62,7 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
 
     // Run ffmpeg with file paths
     await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
+      const ffmpeg = spawn(ffmpegStatic || "ffmpeg", [
         "-i", inputPath,
         "-vn",              // Extract audio only (ignore video track)
         "-f", "wav",

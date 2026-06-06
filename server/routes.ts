@@ -5,6 +5,7 @@ import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, c
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
 import { ensureVideoAnalysisForAsset, VIDEO_ANALYSIS_MODEL, VIDEO_ANALYSIS_VERSION } from "./video-intelligence";
+import { renderTimelineVideo } from "./timeline-renderer";
 import { requireAuth, requireAdmin, hashPassword } from "./auth";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
@@ -95,6 +96,50 @@ const pipeR2Media = async (
 };
 
 const queuedVideoAnalysisAssetIds = new Set<number>();
+const queuedStudioRenderAssetIds = new Set<number>();
+
+const renderStudioTimelineForAsset = async (asset: { id: number; timelineJson?: unknown; name?: string | null }, reason: string) => {
+  if (!asset.timelineJson || typeof asset.timelineJson !== "object") return null;
+  const renderedKey = await renderTimelineVideo(asset.id, asset.timelineJson as any);
+  const updated = await storage.updateAsset(asset.id, { videoKey: renderedKey });
+  console.info("[studio-render] ready", {
+    assetId: asset.id,
+    assetName: asset.name || null,
+    reason,
+    renderedKey,
+  });
+  return updated || await storage.getAsset(asset.id);
+};
+
+const queueStudioRenderForAsset = (asset: { id: number; name?: string | null }, reason: string) => {
+  if (queuedStudioRenderAssetIds.has(asset.id)) return;
+  queuedStudioRenderAssetIds.add(asset.id);
+  storage.getAsset(asset.id)
+    .then((freshAsset) => freshAsset ? renderStudioTimelineForAsset(freshAsset, reason) : null)
+    .then((updatedAsset) => {
+      if (updatedAsset) return ensureVideoAnalysisForAsset(updatedAsset, { timelineJson: updatedAsset.timelineJson as any });
+      return null;
+    })
+    .then((result) => {
+      if (!result) return;
+      console.info("[studio-render] analysis ready", {
+        assetId: asset.id,
+        reason,
+        reused: result.reused,
+      });
+    })
+    .catch((err) => {
+      console.warn("[studio-render] background render failed", {
+        assetId: asset.id,
+        assetName: asset.name || null,
+        reason,
+        error: err?.message || String(err),
+      });
+    })
+    .finally(() => {
+      queuedStudioRenderAssetIds.delete(asset.id);
+    });
+};
 
 const queueVideoAnalysisForAsset = (asset: { id: number; name?: string | null }, reason: string) => {
   if (queuedVideoAnalysisAssetIds.has(asset.id)) return;
@@ -558,7 +603,11 @@ export async function registerRoutes(
       if (timelineJson !== undefined) updateData.timelineJson = timelineJson;
 
       const updated = await storage.updateAsset(id, updateData);
-      if (updated && videoKey !== undefined && videoKey) queueVideoAnalysisForAsset(updated, "video-replaced");
+      if (updated && timelineJson !== undefined) {
+        queueStudioRenderForAsset(updated, "studio-timeline-saved");
+      } else if (updated && videoKey !== undefined && videoKey) {
+        queueVideoAnalysisForAsset(updated, "video-replaced");
+      }
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -650,7 +699,19 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const result = await ensureVideoAnalysisForAsset(asset, { force: Boolean(req.body?.force) });
+      const renderedAsset = asset.timelineJson && typeof asset.timelineJson === "object"
+        ? await renderStudioTimelineForAsset(asset, "manual-video-analysis").catch((err) => {
+            console.warn("[studio-render] manual analysis render fallback", {
+              assetId: asset.id,
+              error: err?.message || String(err),
+            });
+            return asset;
+          })
+        : asset;
+      const result = await ensureVideoAnalysisForAsset(renderedAsset || asset, {
+        force: Boolean(req.body?.force),
+        timelineJson: (renderedAsset || asset).timelineJson as any,
+      });
       res.json({
         status: "ready",
         reused: result.reused,
@@ -667,6 +728,43 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to analyze video" });
+    }
+  });
+
+  app.post("/api/assets/:id/render-studio", requireAuth, async (req, res) => {
+    try {
+      const assetId = parseInt(String(req.params.id));
+      const asset = await storage.getAsset(assetId);
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (req.user!.role !== "admin" && asset.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const timelineJson = req.body?.timelineJson && typeof req.body.timelineJson === "object"
+        ? req.body.timelineJson
+        : asset.timelineJson;
+      if (!timelineJson || typeof timelineJson !== "object") {
+        return res.status(400).json({ error: "No Studio timeline found to render." });
+      }
+
+      const assetForRender = req.body?.timelineJson
+        ? await storage.updateAsset(asset.id, { timelineJson }) || asset
+        : asset;
+      const updatedAsset = await renderStudioTimelineForAsset(assetForRender, "manual-studio-render");
+      if (!updatedAsset?.videoKey) {
+        return res.status(500).json({ error: "Studio render did not produce a video file." });
+      }
+
+      queueVideoAnalysisForAsset(updatedAsset, "studio-rendered");
+      res.json({
+        status: "ready",
+        assetId: updatedAsset.id,
+        videoKey: updatedAsset.videoKey,
+        videoUrl: `/api/assets/${updatedAsset.id}/media/video`,
+        analysisQueued: true,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to render Studio timeline" });
     }
   });
 
@@ -1183,7 +1281,7 @@ export async function registerRoutes(
 
       await new Promise<void>((resolve, reject) => {
         const { spawn } = require("child_process");
-        const ffmpeg = spawn("ffmpeg", [
+        const ffmpeg = spawn(ffmpegStatic || "ffmpeg", [
           "-i", inputPath,
           "-vn",
           "-acodec", "libmp3lame",
@@ -1270,7 +1368,7 @@ export async function registerRoutes(
 
       await new Promise<void>((resolve, reject) => {
         const { spawn } = require("child_process");
-        const ffmpeg = spawn("ffmpeg", [
+        const ffmpeg = spawn(ffmpegStatic || "ffmpeg", [
           "-i", inputPath,
           "-ss", String(start),
           "-to", String(end),

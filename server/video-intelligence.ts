@@ -17,6 +17,21 @@ type AnalysisTarget = {
   source: "asset-video" | "builder-shot";
 };
 
+type KeyframeSample = {
+  timeSec: number;
+  dataUrl: string;
+};
+
+type TimelineContextScene = {
+  id: string;
+  name: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  trimStartSec: number;
+  trimEndSec: number;
+};
+
 function createVisionClient(): OpenAI | null {
   if (process.env.OPENAI_API_KEY) {
     return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -70,7 +85,7 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   }
 }
 
-async function extractKeyframes(videoBuffer: Buffer): Promise<string[]> {
+async function extractKeyframes(videoBuffer: Buffer): Promise<KeyframeSample[]> {
   const workDir = await mkdtemp(join(tmpdir(), "video-analysis-"));
   try {
     const inputPath = join(workDir, "input.mp4");
@@ -89,23 +104,47 @@ async function extractKeyframes(videoBuffer: Buffer): Promise<string[]> {
       .filter((file) => /^frame_\d+\.jpg$/.test(file))
       .sort();
 
-    const dataUrls: string[] = [];
-    for (const file of files) {
+    const samples: KeyframeSample[] = [];
+    for (const [index, file] of files.entries()) {
       const frame = await readFile(join(workDir, file));
-      dataUrls.push(`data:image/jpeg;base64,${frame.toString("base64")}`);
+      samples.push({
+        timeSec: index * 2,
+        dataUrl: `data:image/jpeg;base64,${frame.toString("base64")}`,
+      });
     }
-    return dataUrls;
+    return samples;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function analyzeKeyframes(keyframeDataUrls: string[], model: string): Promise<Record<string, unknown>> {
+function buildTimelineContext(timelineJson?: Record<string, any> | null): TimelineContextScene[] {
+  const tracks = Array.isArray(timelineJson?.tracks) ? timelineJson.tracks : [];
+  return tracks
+    .flatMap((track: any) => Array.isArray(track.items) ? track.items : [])
+    .filter((item: any) => item?.type === "video")
+    .sort((a: any, b: any) => Number(a.startTime || 0) - Number(b.startTime || 0))
+    .map((item: any) => {
+      const startSec = Number(item.startTime || 0);
+      const durationSec = Number(item.duration || 0);
+      return {
+        id: String(item.id || ""),
+        name: String(item.name || "Video clip"),
+        startSec,
+        endSec: Number((startSec + durationSec).toFixed(2)),
+        durationSec,
+        trimStartSec: Number(item.trimStart || 0),
+        trimEndSec: Number(item.trimEnd || durationSec),
+      };
+    });
+}
+
+async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, timelineScenes: TimelineContextScene[]): Promise<Record<string, unknown>> {
   const client = createVisionClient();
   if (!client) {
     throw new Error("Missing OpenAI credentials for video analysis. Set OPENAI_API_KEY or AI_INTEGRATIONS_OPENAI_API_KEY.");
   }
-  if (keyframeDataUrls.length === 0) {
+  if (keyframes.length === 0) {
     throw new Error("No keyframes were extracted from this video");
   }
 
@@ -120,7 +159,8 @@ async function analyzeKeyframes(keyframeDataUrls: string[], model: string): Prom
           "You are Buzzly/Brandy's reusable Video Intelligence Layer.",
           "Analyze product/social video keyframes once, then return reusable production intelligence as strict JSON.",
           "Return concise but useful arrays. Do not include markdown.",
-          "Required JSON keys: overall_summary, product_or_main_subject, scenes, visible_actions, detected_text_ocr, emotional_tone, pacing, important_moments, suggested_hooks, suggested_sound_effects, suggested_transitions, suggested_captions_overlay_text, suggested_cut_points, possible_product_benefits_shown_visually.",
+          "The user needs time-aware analysis. Every scene, important moment, hook, sound effect, transition, caption, and cut point should include start_sec/end_sec or at_sec whenever possible.",
+          "Required JSON keys: overall_summary, product_or_main_subject, timeline_seconds, scenes, visible_actions, detected_text_ocr, emotional_tone, pacing, important_moments, suggested_hooks, suggested_sound_effects, suggested_transitions, suggested_captions_overlay_text, suggested_cut_points, possible_product_benefits_shown_visually, script_timing_guidance.",
         ].join(" "),
       },
       {
@@ -128,11 +168,18 @@ async function analyzeKeyframes(keyframeDataUrls: string[], model: string): Prom
         content: [
           {
             type: "text",
-            text: "Analyze these sampled video keyframes for reusable script, captions, hook, sound, transition, auto-cut, and timeline-label decisions.",
+            text: [
+              "Analyze these sampled video keyframes for reusable script, captions, hook, sound, transition, auto-cut, and timeline-label decisions.",
+              `Keyframe timestamps: ${keyframes.map((frame) => `${frame.timeSec}s`).join(", ")}`,
+              timelineScenes.length
+                ? `Studio timeline clip map: ${JSON.stringify(timelineScenes)}`
+                : "No Studio timeline clip map is available; infer timing from keyframe timestamps.",
+              "For script_timing_guidance, recommend short narration beats that align with the visible shot seconds.",
+            ].join("\n"),
           },
-          ...keyframeDataUrls.map((url) => ({
+          ...keyframes.map((frame) => ({
             type: "image_url",
-            image_url: { url },
+            image_url: { url: frame.dataUrl },
           })),
         ] as any,
       },
@@ -155,7 +202,7 @@ export async function getAssetAnalysisTarget(asset: Asset): Promise<AnalysisTarg
 
 export async function ensureVideoAnalysisForAsset(
   asset: Asset,
-  options: { force?: boolean; model?: string; analysisVersion?: string } = {},
+  options: { force?: boolean; model?: string; analysisVersion?: string; timelineJson?: Record<string, any> | null } = {},
 ): Promise<{ analysis: VideoAnalysis; reused: boolean; videoHash: string; source: AnalysisTarget["source"] }> {
   const model = options.model || VIDEO_ANALYSIS_MODEL;
   const analysisVersion = options.analysisVersion || VIDEO_ANALYSIS_VERSION;
@@ -185,7 +232,7 @@ export async function ensureVideoAnalysisForAsset(
   }
 
   const keyframes = await extractKeyframes(videoBuffer);
-  const analysisJson = await analyzeKeyframes(keyframes, model);
+  const analysisJson = await analyzeKeyframes(keyframes, model, buildTimelineContext(options.timelineJson || asset.timelineJson as Record<string, any> | null));
   const analysis = await storage.createVideoAnalysis({
     videoAssetId: asset.id,
     videoHash,

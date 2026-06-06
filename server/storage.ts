@@ -19,6 +19,7 @@ export interface IStorage {
   createJob(assetId: number, userId?: number, activateShuffle?: boolean): Promise<Job>;
   getJobs(userId?: number): Promise<(Job & { assetName?: string })[]>;
   getJob(id: number): Promise<Job | undefined>;
+  claimQueuedJob(id: number): Promise<Job | undefined>;
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
   appendJobLog(id: number, message: string): Promise<void>;
   deleteJob(id: number): Promise<void>;
@@ -137,6 +138,15 @@ export class DatabaseStorage implements IStorage {
 
   async getJob(id: number): Promise<Job | undefined> {
     const [result] = await db.select().from(jobs).where(eq(jobs.id, id));
+    return result;
+  }
+
+  async claimQueuedJob(id: number): Promise<Job | undefined> {
+    const [result] = await db
+      .update(jobs)
+      .set({ status: "processing" })
+      .where(and(eq(jobs.id, id), eq(jobs.status, "queued")))
+      .returning();
     return result;
   }
 

@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Image,
   Layers3,
+  Loader2,
   Music2,
   PanelLeftClose,
   Play,
@@ -348,6 +349,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [setupBuilderMode, setSetupBuilderMode] = useState(false);
   const [setupBuilderFiles, setSetupBuilderFiles] = useState<File[]>([]);
   const [setupBuilderTimeline, setSetupBuilderTimeline] = useState<{ assetId: number | null; timeline: BuzzlyTimelineJson } | null>(null);
+  const [studioRendering, setStudioRendering] = useState(false);
   const [libraryAssets, setLibraryAssets] = useState<StudioLibraryAsset[]>(() => (
     FREE_MUSIC_LIBRARY.map((track) => ({
       id: track.id,
@@ -1440,6 +1442,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           source: {
             kind: "remote",
             uri: mediaUrls.videoUrl,
+            r2Key: asset.videoKey,
             filename: asset.videoKey.split("/").pop() || asset.videoKey,
             mimeType: mimeTypeFromKey(asset.videoKey, "video/mp4"),
           },
@@ -1463,6 +1466,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           source: {
             kind: "remote",
             uri: mediaUrls.photoUrl,
+            r2Key: asset.photoKey,
             filename: asset.photoKey.split("/").pop() || asset.photoKey,
             mimeType: mimeTypeFromKey(asset.photoKey, "image/jpeg"),
           },
@@ -1486,6 +1490,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           source: {
             kind: "remote",
             uri: mediaUrls.musicUrl,
+            r2Key: asset.musicKey || undefined,
             filename: asset.musicKey?.split("/").pop() || asset.musicKey || "music.mp3",
             mimeType: mimeTypeFromKey(asset.musicKey || "", "audio/mpeg"),
           },
@@ -1725,6 +1730,45 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       title: "Fast export ready",
       description: `${architecture.currentEstimate.duration}s video estimated at ${architecture.currentEstimate.estimatedExportSeconds}s export. Target: under ${architecture.targetExportSeconds}s.`,
     });
+  };
+
+  const handleRenderStudio = async () => {
+    if (!editingAsset) {
+      toast({
+        title: "Save setup first",
+        description: "Create or open a saved setup before rendering the Studio timeline.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (studioRendering) return;
+
+    setStudioRendering(true);
+    try {
+      const res = await fetch(`/api/assets/${editingAsset.id}/render-studio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ timelineJson: timeline }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Studio render failed (${res.status})`);
+      }
+
+      setEditingAsset((current) => (
+        current && current.id === editingAsset.id ? { ...current, videoKey: data.videoKey || current.videoKey, timelineJson: timeline as any } : current
+      ));
+      setSetupBuilderTimeline({ assetId: editingAsset.id, timeline: JSON.parse(JSON.stringify(timeline)) });
+      toast({
+        title: "Studio rendered",
+        description: "Rendered video is now the source for Generate and Video Analysis.",
+      });
+    } catch (err: any) {
+      toast({ title: "Render error", description: err.message, variant: "destructive" });
+    } finally {
+      setStudioRendering(false);
+    }
   };
 
   const openShotSlotInStudio = (slot: GuidedShotSlot) => {
@@ -2438,6 +2482,16 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                       <Play className="h-4 w-4" />
                       Preview
                     </Button>
+                    <Button
+                      variant="outline"
+                      className="h-10 gap-2 border-sky-400/30 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20"
+                      onClick={handleRenderStudio}
+                      disabled={studioRendering}
+                      title="Render Studio timeline for Generate and Video Analysis"
+                    >
+                      {studioRendering ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+                      Render
+                    </Button>
                     <Button onClick={handleExport} className="h-10 gap-2 bg-[#ffc400] font-semibold text-black hover:bg-[#ffd84a]">
                       Export Video
                       <ChevronDown className="h-4 w-4" />
@@ -2476,18 +2530,13 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-11 min-w-[96px] border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
-                    onClick={shuffleSelectedShots}
+                    className="h-11 min-w-[88px] border-sky-400/30 bg-sky-400/10 px-2 text-xs text-sky-200 hover:bg-sky-400/20"
+                    onClick={handleRenderStudio}
+                    disabled={studioRendering}
+                    title="Render Studio timeline"
                   >
-                    <Shuffle className="mr-1 h-4 w-4" />
-                    Shuffle
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-11 min-w-[92px] border-[#ffc400]/35 bg-[#ffc400]/10 px-2 text-xs text-[#ffc400] hover:bg-[#ffc400]/20"
-                    onClick={() => handleTimelineToolAction("cut-dead-air")}
-                  >
-                    Cut Air
+                    {studioRendering ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Video className="mr-1 h-4 w-4" />}
+                    Render
                   </Button>
                   <Button
                     variant="outline"

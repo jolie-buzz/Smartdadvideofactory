@@ -1,12 +1,14 @@
 import ffmpegStatic from "ffmpeg-static";
 import { spawn } from "child_process";
 import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
-import { join } from "path";
+import { basename, join } from "path";
 import { tmpdir } from "os";
 import { downloadFromR2, uploadToR2 } from "./r2";
+import { storage } from "./storage";
 
 type TimelineSource = {
   r2Key?: string;
+  uri?: string;
 };
 
 type TimelineItem = {
@@ -59,15 +61,33 @@ function runFfmpeg(args: string[], timeoutMs = 600_000): Promise<void> {
 
 const quoteConcatPath = (filePath: string) => `file '${filePath.replace(/'/g, "'\\''")}'`;
 
-const getTimelineVideoItems = (timelineJson: TimelineJson) => (
+const itemCanUseAssetVideo = (item: TimelineItem, assetId: number, assetVideoKey?: string | null) => {
+  if (!assetVideoKey) return false;
+  const uri = item.source?.uri || "";
+  const filename = item.source?.r2Key || item.source?.uri || "";
+  const assetFilename = basename(assetVideoKey);
+  return (
+    uri.includes(`/api/assets/${assetId}/media/video`)
+    || uri.includes(assetVideoKey)
+    || uri.includes(assetFilename)
+    || filename.includes(assetVideoKey)
+    || filename.includes(assetFilename)
+  );
+};
+
+const getTimelineVideoItems = (timelineJson: TimelineJson, assetId: number, assetVideoKey?: string | null) => (
   (timelineJson.tracks || [])
     .flatMap((track) => track.items || [])
-    .filter((item) => item.type === "video" && item.source?.r2Key)
+    .filter((item) => item.type === "video" && (
+      item.source?.r2Key
+      || itemCanUseAssetVideo(item, assetId, assetVideoKey)
+    ))
     .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
 );
 
 export async function renderTimelineVideo(assetId: number, timelineJson: TimelineJson): Promise<string> {
-  const videoItems = getTimelineVideoItems(timelineJson);
+  const asset = await storage.getAsset(assetId);
+  const videoItems = getTimelineVideoItems(timelineJson, assetId, asset?.videoKey);
   if (videoItems.length === 0) {
     throw new Error("No renderable Studio timeline video clips found");
   }
@@ -79,7 +99,8 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
 
     for (let index = 0; index < videoItems.length; index++) {
       const item = videoItems[index];
-      const sourceKey = item.source?.r2Key;
+      const sourceKey = item.source?.r2Key
+        || (itemCanUseAssetVideo(item, assetId, asset?.videoKey) ? asset?.videoKey : undefined);
       if (!sourceKey) continue;
 
       const inputPath = join(workDir, `input_${index}.mp4`);

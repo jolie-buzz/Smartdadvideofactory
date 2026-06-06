@@ -8,6 +8,7 @@ import { existsSync } from "fs";
 import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import ffmpegStatic from "ffmpeg-static";
 import OpenAI from "openai";
 import { sanitizeNarrationScript } from "@shared/script-cleaner";
 
@@ -190,7 +191,7 @@ function shouldFallbackFromTtsError(error: unknown): boolean {
 
 function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args);
+    const proc = spawn(ffmpegStatic || "ffmpeg", args);
     let stderr = "";
     let killed = false;
 
@@ -417,7 +418,7 @@ async function generateSeoKeywords(seoPrompt: string | null, photoUrl: string | 
 }
 
 async function processJob(jobId: number): Promise<void> {
-  const job = await storage.getJob(jobId);
+  const job = await storage.claimQueuedJob(jobId);
   if (!job) return;
 
   const asset = await storage.getAsset(job.assetId);
@@ -426,9 +427,6 @@ async function processJob(jobId: number): Promise<void> {
     await storage.appendJobLog(jobId, "Asset not found");
     return;
   }
-
-  // Immediately lock this job so no other poll cycle can re-pick it
-  await storage.updateJob(jobId, { status: "processing" });
 
   const workDir = await mkdtemp(join(tmpdir(), `job-${jobId}-`));
 
@@ -620,7 +618,7 @@ async function processJob(jobId: number): Promise<void> {
     let videoAnalysisSummary = "";
     try {
       await storage.appendJobLog(jobId, "Checking reusable video analysis cache...");
-      const videoAnalysisResult = await ensureVideoAnalysisForAsset(asset);
+      const videoAnalysisResult = await ensureVideoAnalysisForAsset(asset, { timelineJson: asset.timelineJson as any });
       videoAnalysisSummary = summarizeVideoAnalysisForPrompt(videoAnalysisResult.analysis);
       await storage.appendJobLog(jobId, videoAnalysisResult.reused
         ? "Video analysis reused from saved cache."

@@ -172,6 +172,25 @@ const queueVideoAnalysisForAsset = (asset: { id: number; name?: string | null },
     });
 };
 
+const timelineContainsR2Key = (timelineJson: unknown, key: string) => {
+  if (!timelineJson || typeof timelineJson !== "object") return false;
+  const tracks = Array.isArray((timelineJson as any).tracks) ? (timelineJson as any).tracks : [];
+  return tracks.some((track: any) => (
+    Array.isArray(track?.items)
+    && track.items.some((item: any) => item?.source?.r2Key === key)
+  ));
+};
+
+const userCanAccessR2Key = async (user: Express.User, key: string) => {
+  const assetsList = await storage.getAssets(user.role === "admin" ? undefined : user.id);
+  return assetsList.some((asset) => (
+    asset.photoKey === key
+    || asset.videoKey === key
+    || asset.musicKey === key
+    || timelineContainsR2Key(asset.timelineJson, key)
+  ));
+};
+
 function runRouteFfmpeg(args: string[], timeoutMs = 300_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegStatic || "ffmpeg", args);
@@ -494,6 +513,29 @@ export async function registerRoutes(
       res.json(Object.fromEntries(entries));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/media/r2", requireAuth, async (req, res) => {
+    const key = String(req.query.key || "");
+    try {
+      if (!key || key.startsWith("public:")) {
+        return res.status(400).json({ error: "A private R2 media key is required" });
+      }
+      if (!(await userCanAccessR2Key(req.user!, key))) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      await pipeR2Media(res, key, req.headers.range, { assetId: 0, kind: "r2-key" });
+    } catch (err: any) {
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      console.warn("[media] R2 key stream failed", {
+        key,
+        error: compactMediaError(err),
+      });
+      res.status(500).json({ error: err.message || "Failed to load media" });
     }
   });
 

@@ -265,6 +265,21 @@ const mimeTypeFromKey = (key: string, fallback: string) => {
   return fallback;
 };
 
+const stableR2MediaUrl = (key?: string | null) => (
+  key && !key.startsWith("public:") ? `/api/media/r2?key=${encodeURIComponent(key)}` : undefined
+);
+
+const hydrateTimelineMediaSources = (timeline: BuzzlyTimelineJson): BuzzlyTimelineJson => ({
+  ...timeline,
+  tracks: timeline.tracks.map((track) => ({
+    ...track,
+    items: track.items.map((item) => {
+      const stableUri = stableR2MediaUrl(item.source?.r2Key);
+      return stableUri ? { ...item, source: { ...item.source!, uri: stableUri } } : item;
+    }),
+  })),
+});
+
 const moveMainVideoClipWithRipple = (timeline: BuzzlyTimelineJson, id: string, desiredStartTime: number): BuzzlyTimelineJson => {
   let didMoveSequenceClip = false;
   const nextTracks = timeline.tracks.map((track) => {
@@ -1374,7 +1389,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       };
 
       if (setupBuilderTimeline?.assetId === asset.id) {
-        const restoredTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(setupBuilderTimeline.timeline));
+        const restoredTimeline = hydrateTimelineMediaSources(JSON.parse(JSON.stringify(setupBuilderTimeline.timeline)));
         const restoredItems = restoredTimeline.tracks.flatMap((track) => track.items);
         setTimeline(restoredTimeline);
         setEditingAsset(asset);
@@ -1388,7 +1403,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       }
 
       if (asset.timelineJson && typeof asset.timelineJson === "object") {
-        const savedTimeline: BuzzlyTimelineJson = JSON.parse(JSON.stringify(asset.timelineJson));
+        const savedTimeline = hydrateTimelineMediaSources(JSON.parse(JSON.stringify(asset.timelineJson)));
         if (!canPreviewSavedTimeline(savedTimeline)) {
           toast({
             title: "Timeline media needs refresh",
@@ -1434,6 +1449,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       const audioItems: BuzzlyTimelineItem[] = [];
 
       if (mediaUrls.videoUrl) {
+        const videoUri = stableR2MediaUrl(asset.videoKey) || mediaUrls.videoUrl;
         videoItems.push({
           id: `recovered-video-${asset.id}`,
           type: "video",
@@ -1441,7 +1457,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           trackId: "video-main",
           source: {
             kind: "remote",
-            uri: mediaUrls.videoUrl,
+            uri: videoUri,
             r2Key: asset.videoKey,
             filename: asset.videoKey.split("/").pop() || asset.videoKey,
             mimeType: mimeTypeFromKey(asset.videoKey, "video/mp4"),
@@ -1458,6 +1474,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       }
 
       if (mediaUrls.photoUrl) {
+        const photoUri = stableR2MediaUrl(asset.photoKey) || mediaUrls.photoUrl;
         imageItems.push({
           id: `recovered-photo-${asset.id}`,
           type: "image",
@@ -1465,7 +1482,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           trackId: "image-overlays",
           source: {
             kind: "remote",
-            uri: mediaUrls.photoUrl,
+            uri: photoUri,
             r2Key: asset.photoKey,
             filename: asset.photoKey.split("/").pop() || asset.photoKey,
             mimeType: mimeTypeFromKey(asset.photoKey, "image/jpeg"),
@@ -1482,6 +1499,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       }
 
       if (mediaUrls.musicUrl) {
+        const musicUri = stableR2MediaUrl(asset.musicKey) || mediaUrls.musicUrl;
         audioItems.push({
           id: `recovered-music-${asset.id}`,
           type: "audio",
@@ -1489,7 +1507,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
           trackId: "audio-main",
           source: {
             kind: "remote",
-            uri: mediaUrls.musicUrl,
+            uri: musicUri,
             r2Key: asset.musicKey || undefined,
             filename: asset.musicKey?.split("/").pop() || asset.musicKey || "music.mp3",
             mimeType: mimeTypeFromKey(asset.musicKey || "", "audio/mpeg"),

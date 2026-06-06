@@ -84,13 +84,16 @@ const itemCanUseAssetVideo = (item: TimelineItem, assetId: number, assetVideoKey
   );
 };
 
+const getRenderableSourceKey = (item: TimelineItem, assetId: number, assetVideoKey?: string | null) => {
+  if (item.source?.r2Key) return item.source.r2Key;
+  if (itemCanUseAssetVideo(item, assetId, assetVideoKey)) return assetVideoKey || undefined;
+  return undefined;
+};
+
 const getTimelineVideoItems = (timelineJson: TimelineJson, assetId: number, assetVideoKey?: string | null) => (
   (timelineJson.tracks || [])
     .flatMap((track) => track.items || [])
-    .filter((item) => item.type === "video" && (
-      item.source?.r2Key
-      || itemCanUseAssetVideo(item, assetId, assetVideoKey)
-    ))
+    .filter((item) => item.type === "video" && Boolean(getRenderableSourceKey(item, assetId, assetVideoKey)))
     .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
 );
 
@@ -108,8 +111,7 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
 
     for (let index = 0; index < videoItems.length; index++) {
       const item = videoItems[index];
-      const sourceKey = item.source?.r2Key
-        || (itemCanUseAssetVideo(item, assetId, asset?.videoKey) ? asset?.videoKey : undefined);
+      const sourceKey = getRenderableSourceKey(item, assetId, asset?.videoKey);
       if (!sourceKey) continue;
 
       const inputPath = join(workDir, `input_${index}.mp4`);

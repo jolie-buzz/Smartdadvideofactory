@@ -1,12 +1,11 @@
 import ffmpegStatic from "ffmpeg-static";
 import OpenAI from "openai";
-import { createHash } from "crypto";
 import { spawn } from "child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { storage } from "./storage";
-import { downloadFromR2 } from "./r2";
+import { downloadFileFromR2, hashFileSha256 } from "./r2";
 import type { Asset, VideoAnalysis } from "@shared/schema";
 
 export const VIDEO_ANALYSIS_VERSION = "video-intelligence-v1";
@@ -85,12 +84,9 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   }
 }
 
-async function extractKeyframes(videoBuffer: Buffer): Promise<KeyframeSample[]> {
+async function extractKeyframes(inputPath: string): Promise<KeyframeSample[]> {
   const workDir = await mkdtemp(join(tmpdir(), "video-analysis-"));
   try {
-    const inputPath = join(workDir, "input.mp4");
-    await writeFile(inputPath, videoBuffer);
-
     await runFfmpeg([
       "-y",
       "-i", inputPath,
@@ -211,37 +207,44 @@ export async function ensureVideoAnalysisForAsset(
     throw new Error("No video found to analyze. Upload or save a Studio video first.");
   }
 
-  const videoBuffer = await downloadFromR2(target.r2Key);
-  const videoHash = createHash("sha256").update(videoBuffer).digest("hex");
+  const workDir = await mkdtemp(join(tmpdir(), "video-analysis-source-"));
+  const inputPath = join(workDir, "source.mp4");
 
-  if (!options.force) {
-    const cached = await storage.getVideoAnalysisByHash(videoHash, analysisVersion, model);
-    if (cached) {
-      if (cached.videoAssetId === asset.id) {
-        return { analysis: cached, reused: true, videoHash, source: target.source };
+  try {
+    await downloadFileFromR2(target.r2Key, inputPath);
+    const videoHash = await hashFileSha256(inputPath);
+
+    if (!options.force) {
+      const cached = await storage.getVideoAnalysisByHash(videoHash, analysisVersion, model);
+      if (cached) {
+        if (cached.videoAssetId === asset.id) {
+          return { analysis: cached, reused: true, videoHash, source: target.source };
+        }
+        const cloned = await storage.createVideoAnalysis({
+          videoAssetId: asset.id,
+          videoHash,
+          analysisJson: cached.analysisJson,
+          modelUsed: model,
+          analysisVersion,
+        });
+        return { analysis: cloned, reused: true, videoHash, source: target.source };
       }
-      const cloned = await storage.createVideoAnalysis({
-        videoAssetId: asset.id,
-        videoHash,
-        analysisJson: cached.analysisJson,
-        modelUsed: model,
-        analysisVersion,
-      });
-      return { analysis: cloned, reused: true, videoHash, source: target.source };
     }
+
+    const keyframes = await extractKeyframes(inputPath);
+    const analysisJson = await analyzeKeyframes(keyframes, model, buildTimelineContext(options.timelineJson || asset.timelineJson as Record<string, any> | null));
+    const analysis = await storage.createVideoAnalysis({
+      videoAssetId: asset.id,
+      videoHash,
+      analysisJson,
+      modelUsed: model,
+      analysisVersion,
+    });
+
+    return { analysis, reused: false, videoHash, source: target.source };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
-
-  const keyframes = await extractKeyframes(videoBuffer);
-  const analysisJson = await analyzeKeyframes(keyframes, model, buildTimelineContext(options.timelineJson || asset.timelineJson as Record<string, any> | null));
-  const analysis = await storage.createVideoAnalysis({
-    videoAssetId: asset.id,
-    videoHash,
-    analysisJson,
-    modelUsed: model,
-    analysisVersion,
-  });
-
-  return { analysis, reused: false, videoHash, source: target.source };
 }
 
 export function summarizeVideoAnalysisForPrompt(analysis?: VideoAnalysis | null): string {

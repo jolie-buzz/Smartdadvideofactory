@@ -1,11 +1,11 @@
 import { storage } from "./storage";
-import { uploadToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
+import { uploadToR2, uploadFileToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { renderTimelineVideo } from "./timeline-renderer";
 import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt } from "./video-intelligence";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import { writeFile, readFile, mkdtemp, rm } from "fs/promises";
+import { writeFile, readFile, mkdtemp, rm, stat } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import ffmpegStatic from "ffmpeg-static";
@@ -747,11 +747,11 @@ async function processJob(jobId: number): Promise<void> {
 
     // ── Step 6: Upload final video ───────────────────────────────────────────
     await storage.appendJobLog(jobId, "Uploading final video to R2...");
-    const finalBuffer = await readFile(outputPath);
     const finalVideoKey = `jobs/${jobId}/final.mp4`;
-    await uploadToR2(finalVideoKey, finalBuffer, "video/mp4");
+    await uploadFileToR2(finalVideoKey, outputPath, "video/mp4");
+    const finalStats = await stat(outputPath);
     await storage.updateJob(jobId, { finalVideoKey, status: "done" });
-    await storage.appendJobLog(jobId, `Done! Final video uploaded (${(finalBuffer.length / 1024 / 1024).toFixed(2)} MB).`);
+    await storage.appendJobLog(jobId, `Done! Final video uploaded (${(finalStats.size / 1024 / 1024).toFixed(2)} MB).`);
 
   } catch (err: any) {
     console.error(`Job ${jobId} failed:`, err);

@@ -3,11 +3,15 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
 import fs from "fs";
+import { createHash } from "crypto";
+import { pipeline } from "stream/promises";
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID!;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID!;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY!;
 const R2_BUCKET = process.env.R2_BUCKET!;
+const R2_UPLOAD_QUEUE_SIZE = Math.max(1, parseInt(process.env.R2_UPLOAD_QUEUE_SIZE || "1", 10));
+const R2_UPLOAD_PART_SIZE = Math.max(5, parseInt(process.env.R2_UPLOAD_PART_SIZE_MB || "8", 10)) * 1024 * 1024;
 
 const s3 = new S3Client({
   region: "auto",
@@ -27,8 +31,8 @@ export async function uploadToR2(key: string, body: Buffer | Readable, contentTy
       Body: body,
       ContentType: contentType,
     },
-    queueSize: 4,
-    partSize: 10 * 1024 * 1024,
+    queueSize: R2_UPLOAD_QUEUE_SIZE,
+    partSize: R2_UPLOAD_PART_SIZE,
   });
 
   await upload.done();
@@ -37,6 +41,24 @@ export async function uploadToR2(key: string, body: Buffer | Readable, contentTy
 export async function uploadFileToR2(key: string, filePath: string, contentType?: string): Promise<void> {
   const stream = fs.createReadStream(filePath);
   await uploadToR2(key, stream, contentType);
+}
+
+export async function downloadFileFromR2(key: string, filePath: string): Promise<void> {
+  const result = await getR2ObjectStream(key);
+  if (!result.Body) {
+    throw new Error(`R2 object has no body: ${key}`);
+  }
+  await pipeline(result.Body as Readable, fs.createWriteStream(filePath));
+}
+
+export function hashFileSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
 }
 
 export async function getSignedDownloadUrl(key: string, forceDownload?: string): Promise<string> {

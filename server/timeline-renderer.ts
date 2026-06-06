@@ -1,9 +1,9 @@
 import ffmpegStatic from "ffmpeg-static";
 import { spawn } from "child_process";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, rm, writeFile } from "fs/promises";
 import { basename, join } from "path";
 import { tmpdir } from "os";
-import { downloadFromR2, uploadToR2 } from "./r2";
+import { downloadFileFromR2, uploadFileToR2 } from "./r2";
 import { storage } from "./storage";
 
 type TimelineSource = {
@@ -30,6 +30,15 @@ type TimelineJson = {
     items?: TimelineItem[];
   }>;
 };
+
+const STUDIO_RENDER_WIDTH = Math.max(360, parseInt(process.env.STUDIO_RENDER_WIDTH || "720", 10));
+const STUDIO_RENDER_HEIGHT = Math.max(640, parseInt(process.env.STUDIO_RENDER_HEIGHT || "1280", 10));
+const STUDIO_RENDER_PRESET = process.env.STUDIO_RENDER_PRESET || "veryfast";
+
+const fitToStudioFrameFilter = (setPts: string) => (
+  `scale=${STUDIO_RENDER_WIDTH}:${STUDIO_RENDER_HEIGHT}:force_original_aspect_ratio=decrease,` +
+  `pad=${STUDIO_RENDER_WIDTH}:${STUDIO_RENDER_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,${setPts}`
+);
 
 function runFfmpeg(args: string[], timeoutMs = 600_000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -105,8 +114,7 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
 
       const inputPath = join(workDir, `input_${index}.mp4`);
       const outputPath = join(workDir, `clip_${index}.mp4`);
-      const buffer = await downloadFromR2(sourceKey);
-      await writeFile(inputPath, buffer);
+      await downloadFileFromR2(sourceKey, inputPath);
 
       const trimStart = Math.max(0, Number(item.trimStart || 0));
       const timelineDuration = Number(item.duration || 0);
@@ -120,9 +128,10 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
         "-ss", String(trimStart),
         "-t", String(duration),
         "-i", inputPath,
-        "-vf", `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,${setPts}`,
+        "-vf", fitToStudioFrameFilter(setPts),
         "-r", "30",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:v", "libx264", "-preset", STUDIO_RENDER_PRESET, "-crf", "24",
+        "-threads", "1",
         "-pix_fmt", "yuv420p",
         "-an",
         outputPath,
@@ -142,15 +151,15 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
     await runFfmpeg([
       "-y",
       "-f", "concat", "-safe", "0", "-i", concatPath,
-      "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+      "-c:v", "libx264", "-preset", STUDIO_RENDER_PRESET, "-crf", "24",
+      "-threads", "1",
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       outputPath,
     ]);
 
-    const outputBuffer = await readFile(outputPath);
     const r2Key = `timeline-renders/${assetId}/${Date.now()}.mp4`;
-    await uploadToR2(r2Key, outputBuffer, "video/mp4");
+    await uploadFileToR2(r2Key, outputPath, "video/mp4");
     return r2Key;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});

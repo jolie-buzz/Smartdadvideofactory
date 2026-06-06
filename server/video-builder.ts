@@ -1,10 +1,15 @@
 import { storage } from "./storage";
-import { downloadFromR2, uploadToR2 } from "./r2";
+import { downloadFileFromR2, uploadFileToR2 } from "./r2";
 import { spawn } from "child_process";
-import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
+import { writeFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import ffmpegStatic from "ffmpeg-static";
+
+const BUILDER_RENDER_WIDTH = Math.max(360, parseInt(process.env.BUILDER_RENDER_WIDTH || "720", 10));
+const BUILDER_RENDER_HEIGHT = Math.max(640, parseInt(process.env.BUILDER_RENDER_HEIGHT || "1280", 10));
+const BUILDER_RENDER_PRESET = process.env.BUILDER_RENDER_PRESET || "veryfast";
+const BUILDER_FRAME_FILTER = `scale=${BUILDER_RENDER_WIDTH}:${BUILDER_RENDER_HEIGHT}:force_original_aspect_ratio=decrease,pad=${BUILDER_RENDER_WIDTH}:${BUILDER_RENDER_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black`;
 
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -45,8 +50,7 @@ export async function renderVariant(variantId: number): Promise<void> {
     for (const shot of orderedShots) {
       if (!shot) continue;
       const clipPath = join(workDir, `clip_${idx}.mp4`);
-      const buffer = await downloadFromR2(shot.r2Key);
-      await writeFile(clipPath, buffer);
+      await downloadFileFromR2(shot.r2Key, clipPath);
 
       let targetDur: number;
       if (idx === 0) targetDur = template.hook;
@@ -60,9 +64,10 @@ export async function renderVariant(variantId: number): Promise<void> {
       await runFFmpeg([
         "-y", "-i", clipPath,
         "-t", targetDur.toString(),
-        "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+        "-vf", BUILDER_FRAME_FILTER,
         "-r", "30",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:v", "libx264", "-preset", BUILDER_RENDER_PRESET, "-crf", "24",
+        "-threads", "1",
         "-an",
         trimmedPath,
       ]);
@@ -79,14 +84,14 @@ export async function renderVariant(variantId: number): Promise<void> {
     const outputPath = join(workDir, "output.mp4");
     await runFFmpeg([
       "-y", "-f", "concat", "-safe", "0", "-i", concatListPath,
-      "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+      "-c:v", "libx264", "-preset", BUILDER_RENDER_PRESET, "-crf", "24",
+      "-threads", "1",
       "-movflags", "+faststart",
       outputPath,
     ]);
 
-    const outputBuffer = await readFile(outputPath);
     const r2Key = `variants/${variant.assetId}/${variantId}.mp4`;
-    await uploadToR2(r2Key, outputBuffer, "video/mp4");
+    await uploadFileToR2(r2Key, outputPath, "video/mp4");
 
     await storage.updateVariant(variantId, { r2Key, status: "done" });
   } catch (err) {

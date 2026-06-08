@@ -265,6 +265,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [ignoreDetectionsShorterThan, setIgnoreDetectionsShorterThan] = useState(0.75);
   const [music, setMusic] = useState<File | null>(null);
   const [selectedMusicKey, setSelectedMusicKey] = useState("");
+  const [previewingMusicKey, setPreviewingMusicKey] = useState<string | null>(null);
   const [voiceVolume, setVoiceVolume] = useState(1.0);
   const [musicVolume, setMusicVolume] = useState(0.3);
   const [autoCaptions, setAutoCaptions] = useState(false);
@@ -301,6 +302,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [showVideoAnalysis, setShowVideoAnalysis] = useState(false);
   const [reanalyzingVideo, setReanalyzingVideo] = useState(false);
   const voicePreviewRef = useRef<HTMLAudioElement | null>(null);
+  const musicPreviewRef = useRef<HTMLAudioElement | null>(null);
   const replacePhotoInputRef = useRef<HTMLInputElement>(null);
   const replaceVideoInputRef = useRef<HTMLInputElement>(null);
   const replaceMusicInputRef = useRef<HTMLInputElement>(null);
@@ -405,7 +407,6 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   });
   const mediaUrlsQuery = useQuery<Record<number, AssetMediaUrls>>({
     queryKey: ["/api/assets/media-urls"],
-    enabled: !!editingAsset,
   });
   const videoAnalysisQuery = useQuery<VideoAnalysisStatus>({
     queryKey: [`/api/assets/${editingAsset?.id}/video-analysis`],
@@ -439,7 +440,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const selectedVoice = voicesQuery.data?.find((voice) => voice.voice_id === voiceId);
   const uploadedMusicOptions = (assetsQuery.data || [])
     .filter((asset) => asset.musicKey)
-    .map((asset) => ({ key: asset.musicKey!, label: asset.name }));
+    .map((asset) => ({ key: asset.musicKey!, label: asset.name, url: mediaUrlsQuery.data?.[asset.id]?.musicUrl || null }));
+  const selectedFreeMusicTrack = FREE_MUSIC_LIBRARY.find((track) => `public:${track.uri}` === selectedMusicKey);
+  const selectedUploadedMusicOption = uploadedMusicOptions.find((option) => option.key === selectedMusicKey);
+  const selectedMusicPreviewUrl = selectedFreeMusicTrack?.uri || selectedUploadedMusicOption?.url || "";
 
   useEffect(() => {
     if (videoAnalysisQuery.data?.modelUsed) {
@@ -451,6 +455,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     return () => {
       voicePreviewRef.current?.pause();
       voicePreviewRef.current = null;
+      musicPreviewRef.current?.pause();
+      musicPreviewRef.current = null;
     };
   }, []);
 
@@ -846,6 +852,42 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     } catch (err: any) {
       setPreviewingVoiceId(null);
       toast({ title: "Preview failed", description: err.message || "The ElevenLabs sample could not be played.", variant: "destructive" });
+    }
+  };
+
+  const stopMusicPreview = () => {
+    musicPreviewRef.current?.pause();
+    musicPreviewRef.current = null;
+    setPreviewingMusicKey(null);
+  };
+
+  const handlePreviewMusic = async () => {
+    if (!selectedMusicKey || selectedMusicKey === "none") return;
+    if (previewingMusicKey === selectedMusicKey) {
+      stopMusicPreview();
+      return;
+    }
+
+    stopMusicPreview();
+    if (!selectedMusicPreviewUrl) {
+      toast({ title: "Preview not available", description: "This music track does not have a preview URL yet." });
+      return;
+    }
+
+    try {
+      const audio = new Audio(selectedMusicPreviewUrl);
+      audio.volume = 0.75;
+      musicPreviewRef.current = audio;
+      setPreviewingMusicKey(selectedMusicKey);
+      audio.onended = () => setPreviewingMusicKey(null);
+      audio.onerror = () => {
+        setPreviewingMusicKey(null);
+        toast({ title: "Music preview failed", description: "This track could not be played.", variant: "destructive" });
+      };
+      await audio.play();
+    } catch (err: any) {
+      setPreviewingMusicKey(null);
+      toast({ title: "Music preview failed", description: err.message || "This track could not be played.", variant: "destructive" });
     }
   };
 
@@ -1613,28 +1655,50 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
 
             <div className="space-y-2">
               <Label>Choose music</Label>
-              <Select
-                value={selectedMusicKey || "none"}
-                onValueChange={(value) => setSelectedMusicKey(value === "none" ? "" : value)}
-                disabled={isUploading}
-              >
-                <SelectTrigger data-testid="select-background-music">
-                  <SelectValue placeholder="Choose music" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No music</SelectItem>
-                  {FREE_MUSIC_LIBRARY.map((track) => (
-                    <SelectItem key={track.id} value={`public:${track.uri}`}>
-                      {track.title} · {track.mood}
-                    </SelectItem>
-                  ))}
-                  {uploadedMusicOptions.map((option) => (
-                    <SelectItem key={option.key} value={option.key}>
-                      Uploaded · {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select
+                  value={selectedMusicKey || "none"}
+                  onValueChange={(value) => {
+                    stopMusicPreview();
+                    setSelectedMusicKey(value === "none" ? "" : value);
+                  }}
+                  disabled={isUploading}
+                >
+                  <SelectTrigger data-testid="select-background-music">
+                    <SelectValue placeholder="Choose music" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No music</SelectItem>
+                    {FREE_MUSIC_LIBRARY.map((track) => (
+                      <SelectItem key={track.id} value={`public:${track.uri}`}>
+                        {track.title} · {track.mood}
+                      </SelectItem>
+                    ))}
+                    {uploadedMusicOptions.map((option) => (
+                      <SelectItem key={option.key} value={option.key}>
+                        Uploaded · {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 gap-2"
+                  onClick={handlePreviewMusic}
+                  disabled={isUploading || !selectedMusicKey || !selectedMusicPreviewUrl}
+                  data-testid="button-preview-music"
+                >
+                  {previewingMusicKey === selectedMusicKey ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  {previewingMusicKey === selectedMusicKey ? "Stop" : "Preview"}
+                </Button>
+              </div>
+              {(selectedFreeMusicTrack || selectedUploadedMusicOption) && (
+                <p className="text-xs text-muted-foreground">
+                  Selected: <span className="font-medium text-foreground">{selectedFreeMusicTrack?.title || selectedUploadedMusicOption?.label}</span>
+                  {selectedFreeMusicTrack ? ` · ${selectedFreeMusicTrack.mood}` : ""}
+                </p>
+              )}
             </div>
 
             {!isEditing && (

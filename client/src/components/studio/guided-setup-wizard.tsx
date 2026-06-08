@@ -244,8 +244,10 @@ export function GuidedSetupWizard({
   const [isCloningVoice, setIsCloningVoice] = useState(false);
   const [voiceSearch, setVoiceSearch] = useState("");
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+  const [previewingMusicId, setPreviewingMusicId] = useState<string | null>(null);
   const cloneFileInputRef = useRef<HTMLInputElement | null>(null);
   const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const musicPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceRecorderStreamRef = useRef<MediaStream | null>(null);
   const voiceRecorderChunksRef = useRef<Blob[]>([]);
@@ -289,6 +291,8 @@ export function GuidedSetupWizard({
     return () => {
       voicePreviewAudioRef.current?.pause();
       voicePreviewAudioRef.current = null;
+      musicPreviewAudioRef.current?.pause();
+      musicPreviewAudioRef.current = null;
     };
   }, []);
 
@@ -323,6 +327,41 @@ export function GuidedSetupWizard({
       voiceName: selectedVoice ? `${selectedVoice.name} (${selectedVoice.category})` : voiceId,
       voiceMode: "AI voiceover",
     });
+  };
+
+  const stopMusicPreview = () => {
+    musicPreviewAudioRef.current?.pause();
+    musicPreviewAudioRef.current = null;
+    setPreviewingMusicId(null);
+  };
+
+  const handleMusicSelect = (track: (typeof FREE_MUSIC_LIBRARY)[number]) => {
+    stopMusicPreview();
+    updateState({ musicAssetId: track.id, musicName: track.title, musicUri: track.uri });
+  };
+
+  const handlePreviewMusic = async (track: (typeof FREE_MUSIC_LIBRARY)[number]) => {
+    if (previewingMusicId === track.id) {
+      stopMusicPreview();
+      return;
+    }
+
+    stopMusicPreview();
+    try {
+      const audio = new Audio(track.uri);
+      audio.volume = 0.75;
+      musicPreviewAudioRef.current = audio;
+      setPreviewingMusicId(track.id);
+      audio.onended = () => setPreviewingMusicId(null);
+      audio.onerror = () => {
+        setPreviewingMusicId(null);
+        toast({ title: "Music preview failed", description: "This track could not be played.", variant: "destructive" });
+      };
+      await audio.play();
+    } catch (error: any) {
+      setPreviewingMusicId(null);
+      toast({ title: "Music preview failed", description: error.message || "This track could not be played.", variant: "destructive" });
+    }
   };
 
   const stopVoicePreview = () => {
@@ -673,19 +712,33 @@ export function GuidedSetupWizard({
                 <div className="rounded-md border bg-background p-3">
                   <Label>Free music track</Label>
                   <div className="mt-2 grid gap-2">
-                    {FREE_MUSIC_LIBRARY.map((track) => (
-                      <button
-                        key={track.id}
-                        type="button"
-                        onClick={() => updateState({ musicAssetId: track.id, musicName: track.title, musicUri: track.uri })}
-                        className={`rounded-md border px-3 py-2 text-left text-sm ${
-                          setupState.musicAssetId === track.id ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"
-                        }`}
-                      >
-                        <span className="block font-medium">{track.title}</span>
-                        <span className="block text-xs text-muted-foreground">{track.mood}</span>
-                      </button>
-                    ))}
+                    {FREE_MUSIC_LIBRARY.map((track) => {
+                      const isSelected = setupState.musicAssetId === track.id;
+                      const isPreviewing = previewingMusicId === track.id;
+                      return (
+                        <div
+                          key={track.id}
+                          className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm ${
+                            isSelected ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"
+                          }`}
+                        >
+                          <button type="button" onClick={() => handleMusicSelect(track)} className="min-w-0 flex-1 text-left">
+                            <span className="block truncate font-medium">{track.title}</span>
+                            <span className="block truncate text-xs text-muted-foreground">{track.mood}</span>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 gap-2"
+                            onClick={() => handlePreviewMusic(track)}
+                          >
+                            {isPreviewing ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                            {isPreviewing ? "Stop" : "Preview"}
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

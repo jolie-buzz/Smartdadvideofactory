@@ -804,21 +804,33 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No Studio timeline found to render." });
       }
 
+      const applyToSetup = req.body?.applyToSetup === true;
       const assetForRender = req.body?.timelineJson
         ? await storage.updateAsset(asset.id, { timelineJson }) || asset
         : asset;
-      const updatedAsset = await renderStudioTimelineForAsset(assetForRender, "manual-studio-render");
-      if (!updatedAsset?.videoKey) {
+      const renderedKey = await renderTimelineVideo(assetForRender.id, timelineJson as any);
+      const updatedAsset = applyToSetup
+        ? await storage.updateAsset(assetForRender.id, { videoKey: renderedKey })
+        : assetForRender;
+      if (!renderedKey) {
         return res.status(500).json({ error: "Studio render did not produce a video file." });
       }
 
-      queueVideoAnalysisForAsset(updatedAsset, "studio-rendered");
+      console.info("[studio-render] ready", {
+        assetId: assetForRender.id,
+        assetName: assetForRender.name || null,
+        reason: applyToSetup ? "manual-studio-render-applied" : "manual-studio-render-preview",
+        renderedKey,
+        appliedToSetup: applyToSetup,
+      });
+      if (applyToSetup && updatedAsset) queueVideoAnalysisForAsset(updatedAsset, "studio-rendered");
       res.json({
         status: "ready",
-        assetId: updatedAsset.id,
-        videoKey: updatedAsset.videoKey,
-        videoUrl: `/api/assets/${updatedAsset.id}/media/video`,
-        analysisQueued: true,
+        assetId: assetForRender.id,
+        videoKey: renderedKey,
+        videoUrl: `/api/media/r2?key=${encodeURIComponent(renderedKey)}`,
+        appliedToSetup: applyToSetup,
+        analysisQueued: applyToSetup,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to render Studio timeline" });

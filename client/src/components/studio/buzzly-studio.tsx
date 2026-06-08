@@ -31,6 +31,14 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SetupForm } from "@/components/setup-form";
 import { SetupsList, type AssetMediaUrls } from "@/components/setups-list";
 import { JobsList } from "@/components/jobs-list";
@@ -355,6 +363,14 @@ const normalizeTimelineForRender = (timeline: BuzzlyTimelineJson, asset: Asset):
   return { timeline: nextTimeline };
 };
 
+type PendingStudioRender = {
+  assetId: number;
+  assetName: string;
+  videoKey: string;
+  videoUrl?: string;
+  timeline: BuzzlyTimelineJson;
+};
+
 const moveMainVideoClipWithRipple = (timeline: BuzzlyTimelineJson, id: string, desiredStartTime: number): BuzzlyTimelineJson => {
   let didMoveSequenceClip = false;
   const nextTracks = timeline.tracks.map((track) => {
@@ -440,6 +456,8 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
   const [setupBuilderFiles, setSetupBuilderFiles] = useState<File[]>([]);
   const [setupBuilderTimeline, setSetupBuilderTimeline] = useState<{ assetId: number | null; timeline: BuzzlyTimelineJson } | null>(null);
   const [studioRendering, setStudioRendering] = useState(false);
+  const [pendingStudioRender, setPendingStudioRender] = useState<PendingStudioRender | null>(null);
+  const [applyingStudioRender, setApplyingStudioRender] = useState(false);
   const [libraryAssets, setLibraryAssets] = useState<StudioLibraryAsset[]>(() => (
     FREE_MUSIC_LIBRARY.map((track) => ({
       id: track.id,
@@ -1848,25 +1866,65 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ timelineJson: normalized.timeline }),
+        body: JSON.stringify({ timelineJson: normalized.timeline, applyToSetup: false }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || `Studio render failed (${res.status})`);
       }
+      if (!data.videoKey) {
+        throw new Error("Studio render finished but no rendered video key was returned.");
+      }
 
-      setEditingAsset((current) => (
-        current && current.id === editingAsset.id ? { ...current, videoKey: data.videoKey || current.videoKey, timelineJson: normalized.timeline as any } : current
-      ));
       setSetupBuilderTimeline({ assetId: editingAsset.id, timeline: JSON.parse(JSON.stringify(normalized.timeline)) });
+      setPendingStudioRender({
+        assetId: editingAsset.id,
+        assetName: editingAsset.name,
+        videoKey: data.videoKey,
+        videoUrl: data.videoUrl,
+        timeline: JSON.parse(JSON.stringify(normalized.timeline)),
+      });
       toast({
-        title: "Studio rendered",
-        description: "Rendered video is now the source for Generate and Video Analysis.",
+        title: "Studio render ready",
+        description: "Choose whether to use this rendered video for Generate.",
       });
     } catch (err: any) {
       toast({ title: "Render error", description: err.message, variant: "destructive" });
     } finally {
       setStudioRendering(false);
+    }
+  };
+
+  const applyRenderedStudioToSetup = async () => {
+    if (!pendingStudioRender || applyingStudioRender) return;
+    setApplyingStudioRender(true);
+    try {
+      const res = await fetch(`/api/assets/${pendingStudioRender.assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ videoKey: pendingStudioRender.videoKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Could not save rendered video (${res.status})`);
+      }
+
+      setEditingAsset((current) => (
+        current && current.id === pendingStudioRender.assetId
+          ? { ...current, videoKey: pendingStudioRender.videoKey, timelineJson: pendingStudioRender.timeline as any }
+          : current
+      ));
+      setSetupBuilderTimeline({ assetId: pendingStudioRender.assetId, timeline: JSON.parse(JSON.stringify(pendingStudioRender.timeline)) });
+      setPendingStudioRender(null);
+      toast({
+        title: "Rendered video saved to setup",
+        description: "Generate and Video Analysis will now use the Studio-rendered file.",
+      });
+    } catch (err: any) {
+      toast({ title: "Save render error", description: err.message, variant: "destructive" });
+    } finally {
+      setApplyingStudioRender(false);
     }
   };
 
@@ -2892,6 +2950,43 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       >
         <FileJson className="h-5 w-5" />
       </Button>
+
+      <Dialog open={Boolean(pendingStudioRender)} onOpenChange={(open) => {
+        if (!open && !applyingStudioRender) setPendingStudioRender(null);
+      }}>
+        <DialogContent className="border-white/10 bg-[#101620] text-white sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Use rendered video for this setup?</DialogTitle>
+            <DialogDescription className="text-slate-300">
+              Studio finished rendering {pendingStudioRender?.assetName || "this setup"}. Choose whether this rendered file should become the video source used by Generate and Video Analysis.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+            <p className="font-medium text-white">Rendered file</p>
+            <p className="mt-1 break-all">{pendingStudioRender?.videoKey}</p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-white/10 bg-white/[0.04] text-white hover:bg-white/10"
+              onClick={() => setPendingStudioRender(null)}
+              disabled={applyingStudioRender}
+            >
+              Keep in Studio only
+            </Button>
+            <Button
+              type="button"
+              className="bg-[#ffc400] text-black hover:bg-[#ffd84a]"
+              onClick={applyRenderedStudioToSetup}
+              disabled={applyingStudioRender}
+            >
+              {applyingStudioRender ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Use for Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

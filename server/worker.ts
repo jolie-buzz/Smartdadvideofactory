@@ -108,7 +108,9 @@ Rules:
 - If a product image is provided, use the visible product details, branding, text, and features from the image to make the script accurate and specific`;
 
   if (videoAnalysisSummary) {
-    systemMessage += `\n- If reusable video analysis is provided, use the visible actions, pacing, OCR text, benefits, suggested hooks, and important moments from that analysis.`;
+    systemMessage += `\n- Reusable video analysis may be provided under the persona prompt. Treat it as visual context, not as a replacement for the persona. Use the actual scene order, visible actions, OCR text, pacing, hook moments, weak/dead spots, and suggested voiceover beats to make the narration feel synchronized with the video.
+- If visuals are unclear, still write a best-effort benefit-led script and avoid pretending uncertain details are facts.
+- Do not mention the analysis or include timing labels in the final script.`;
   }
 
   if (excludedWords && excludedWords.trim()) {

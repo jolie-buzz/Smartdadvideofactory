@@ -7,6 +7,7 @@ import {
   Lock,
   Loader2,
   Maximize2,
+  GripVertical,
   MoveLeft,
   MoveRight,
   Music2,
@@ -54,6 +55,7 @@ export type TimelineToolAction =
   | "reset";
 
 export type TimelineTransitionPreset = "none" | "fade" | "slide" | "zoom";
+export type TimelineAddLayerType = "video" | "image" | "audio" | "text" | "caption";
 
 type TimelinePanelProps = {
   timeline: BuzzlyTimelineJson;
@@ -65,9 +67,11 @@ type TimelinePanelProps = {
   onUpdateItem: (id: string, patch: Partial<BuzzlyTimelineItem>) => void;
   onSeek: (time: number) => void;
   onToolAction: (tool: TimelineToolAction) => void;
+  onAddLayer: (type: TimelineAddLayerType) => void;
   onTrackUpload?: (type: Extract<BuzzlyClipType, "video" | "image" | "audio">) => void;
-  onMoveItem: (id: string, startTime: number, ripple?: boolean) => void;
+  onMoveItem: (id: string, startTime: number, ripple?: boolean, targetTrackId?: string) => void;
   onTrimItem: (id: string, patch: Partial<BuzzlyTimelineItem>) => void;
+  onReorderTrack: (trackId: string, targetTrackId: string) => void;
   onApplyTransition: (leftId: string, rightId: string, preset: TimelineTransitionPreset) => void;
   onGenerateAiTransition: (leftId: string, rightId: string, prompt: string, seconds: number) => Promise<void>;
 };
@@ -255,9 +259,10 @@ function TimelineClipPreview({ item }: { item: BuzzlyTimelineItem }) {
   );
 }
 
-export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedItemIds = [], onSelectItem, onToggleItemSelection, onUpdateItem, onSeek, onToolAction, onTrackUpload, onMoveItem, onTrimItem, onApplyTransition, onGenerateAiTransition }: TimelinePanelProps) {
+export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedItemIds = [], onSelectItem, onToggleItemSelection, onUpdateItem, onSeek, onToolAction, onAddLayer, onTrackUpload, onMoveItem, onTrimItem, onReorderTrack, onApplyTransition, onGenerateAiTransition }: TimelinePanelProps) {
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const pinchRef = useRef<{ distance: number; pixelsPerSecond: number } | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND);
   const [visibleTrackWidth, setVisibleTrackWidth] = useState(1080);
   const [isMobileTimeline, setIsMobileTimeline] = useState(false);
@@ -301,6 +306,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   if (!markers.includes(timeline.project.duration)) markers.push(timeline.project.duration);
   const selectedItem = timeline.tracks.flatMap((track) => track.items).find((item) => item.id === selectedItemId) || null;
   const selectedVisual = selectedItem && (selectedItem.type === "video" || selectedItem.type === "image") ? selectedItem : null;
+  const visibleTracks = timeline.tracks.filter((track) => track.type === "video" || track.items.length > 0);
   const pickerLeft = transitionPair && typeof window !== "undefined" ? Math.min(Math.max(12, transitionPair.x + 12), window.innerWidth - 340) : 12;
   const pickerTop = transitionPair && typeof window !== "undefined" ? Math.min(Math.max(12, transitionPair.y + 12), window.innerHeight - 460) : 80;
   const zoomAtClientX = (clientX: number, nextPixelsPerSecond: number) => {
@@ -340,11 +346,68 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
   const handleTimelineTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
     if (event.touches.length < 2) pinchRef.current = null;
   };
+  const getTrackAtPoint = (clientX: number, clientY: number) => {
+    const element = document.elementsFromPoint(clientX, clientY)
+      .find((candidate) => candidate instanceof HTMLElement && candidate.dataset.trackLane) as HTMLElement | undefined;
+    const trackId = element?.dataset.trackLane;
+    return trackId ? timeline.tracks.find((track) => track.id === trackId) || null : null;
+  };
+  const startTrackReorderDrag = (trackId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const handleUp = (upEvent: PointerEvent) => {
+      const targetElement = document.elementsFromPoint(upEvent.clientX, upEvent.clientY)
+        .find((candidate) => candidate instanceof HTMLElement && candidate.dataset.trackRow) as HTMLElement | undefined;
+      const targetTrackId = targetElement?.dataset.trackRow;
+      if (targetTrackId && targetTrackId !== trackId) onReorderTrack(trackId, targetTrackId);
+    };
+    window.addEventListener("pointerup", handleUp, { once: true });
+    window.addEventListener("pointercancel", handleUp, { once: true });
+  };
 
   return (
     <section className="relative flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101620]/95 shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:rounded-none max-md:border-x-0 max-md:border-b-0">
       <div className="flex items-center justify-between border-b border-white/10 bg-[#0d131c] px-4 py-3 max-md:hidden">
         <div className="flex flex-wrap items-center gap-1">
+          <div className="relative">
+            <Button
+              variant="ghost"
+              className="h-8 gap-2 px-3 text-xs text-[#ffc400] hover:bg-white/10 hover:text-[#ffc400]"
+              onClick={() => setAddMenuOpen((open) => !open)}
+            >
+              <Plus className="h-4 w-4" />
+              Add
+            </Button>
+            {addMenuOpen && (
+              <div className="absolute left-0 top-10 z-50 w-44 overflow-hidden rounded-lg border border-white/10 bg-[#0b1018] p-1 shadow-2xl">
+                {[
+                  { label: "Video Layer", type: "video" as const, icon: Video },
+                  { label: "Text", type: "text" as const, icon: Type },
+                  { label: "Music", type: "audio" as const, icon: Music2 },
+                  { label: "Photo", type: "image" as const, icon: Image },
+                  { label: "Caption", type: "caption" as const, icon: Captions },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.type}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10 hover:text-white"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        onAddLayer(item.type);
+                      }}
+                    >
+                      <Icon className="h-4 w-4 text-[#ffc400]" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {[
             { label: "Split", icon: Scissors, action: "split" as const },
             { label: "Duplicate", icon: Copy, action: "duplicate" as const },
@@ -602,12 +665,20 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
               <span className="absolute -left-[5px] top-0 h-3 w-3 rounded-full bg-white" />
             </div>
 
-            {timeline.tracks.map((track) => {
+            {visibleTracks.map((track) => {
               const TrackIcon = iconByType[track.type];
               const uploadType = track.type === "video" || track.type === "image" || track.type === "audio" ? track.type : null;
               return (
-            <div key={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `${leftColumnWidth}px ${timelineWidth}px` }}>
+            <div key={track.id} data-track-row={track.id} className="grid border-b border-white/10" style={{ gridTemplateColumns: `${leftColumnWidth}px ${timelineWidth}px` }}>
               <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-white/10 bg-[#0b1018] px-4 py-3 max-md:justify-center max-md:px-0 max-md:py-1.5">
+                <button
+                  type="button"
+                  className="grid h-8 w-6 shrink-0 touch-none place-items-center rounded-md text-slate-500 hover:bg-white/10 hover:text-[#ffc400] max-md:hidden"
+                  title="Drag to reorder track"
+                  onPointerDown={(event) => startTrackReorderDrag(track.id, event)}
+                >
+                  <GripVertical className="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition max-md:h-11 max-md:w-11 max-md:flex-none max-md:justify-center max-md:gap-0 ${
@@ -695,18 +766,14 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                       const candidateEnd = candidate.startTime + candidate.duration;
                       const candidateStart = candidate.startTime;
                       const itemEnd = startTime + item.duration;
-                      if (Math.abs(startTime - candidateEnd) <= SNAP_THRESHOLD_SECONDS) {
-                        snapped = candidateEnd;
-                        shouldRipple = track.id === "video-main" && item.type === "video";
-                      }
-                      if (Math.abs(itemEnd - candidateStart) <= SNAP_THRESHOLD_SECONDS) {
-                        snapped = candidateStart - item.duration;
-                        shouldRipple = track.id === "video-main" && item.type === "video";
-                      }
-                    });
-                    const maxStart = track.id === "video-main" && item.type === "video"
-                      ? timeline.project.duration
-                      : timeline.project.duration - item.duration;
+	                      if (Math.abs(startTime - candidateEnd) <= SNAP_THRESHOLD_SECONDS) {
+	                        snapped = candidateEnd;
+	                      }
+	                      if (Math.abs(itemEnd - candidateStart) <= SNAP_THRESHOLD_SECONDS) {
+	                        snapped = candidateStart - item.duration;
+	                      }
+	                    });
+	                    const maxStart = timeline.project.duration;
                     return {
                       startTime: clampNumber(snapped, 0, maxStart),
                       shouldRipple,
@@ -743,12 +810,14 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                     let didMove = false;
                     const handleMove = (moveEvent: PointerEvent) => {
                       didMove = true;
-                      const pointerTime = timelineRectToSeconds(moveEvent.clientX);
-                      const snapResult = snapStartTime(pointerTime - pointerOffset);
-                      const startTime = Number(snapResult.startTime.toFixed(2));
-                      onMoveItem(item.id, startTime, snapResult.shouldRipple);
-                      onSeek(startTime);
-                    };
+	                      const pointerTime = timelineRectToSeconds(moveEvent.clientX);
+	                      const snapResult = snapStartTime(pointerTime - pointerOffset);
+	                      const startTime = Number(snapResult.startTime.toFixed(2));
+	                      const targetTrack = getTrackAtPoint(moveEvent.clientX, moveEvent.clientY);
+	                      const targetTrackId = targetTrack?.type === item.type ? targetTrack.id : undefined;
+	                      onMoveItem(item.id, startTime, snapResult.shouldRipple, targetTrackId);
+	                      onSeek(startTime);
+	                    };
                     const handleUp = () => {
                       window.removeEventListener("pointermove", handleMove);
                       window.removeEventListener("pointerup", handleUp);
@@ -853,10 +922,41 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
           </div>
         </div>
       </div>
-      {mobilePanel === "tools" && (
-      <div className="hidden shrink-0 border-t border-white/10 bg-[#0b1018] max-md:block">
-        <div className="flex gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {[
+	      {mobilePanel === "tools" && (
+	      <div className="hidden shrink-0 border-t border-white/10 bg-[#0b1018] max-md:block">
+	        <div className="flex gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+	          <button
+	            type="button"
+	            className="flex min-h-14 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-[#ffc400]/50 bg-[#ffc400]/15 px-2 text-[10px] font-medium text-[#ffc400]"
+	            onClick={() => setAddMenuOpen((open) => !open)}
+	          >
+	            <Plus className="h-5 w-5" />
+	            Add
+	          </button>
+	          {addMenuOpen && [
+	            { label: "Video", type: "video" as const, icon: Video },
+	            { label: "Text", type: "text" as const, icon: Type },
+	            { label: "Music", type: "audio" as const, icon: Music2 },
+	            { label: "Photo", type: "image" as const, icon: Image },
+	            { label: "Caption", type: "caption" as const, icon: Captions },
+	          ].map((item) => {
+	            const Icon = item.icon;
+	            return (
+	              <button
+	                key={item.type}
+	                type="button"
+	                className="flex min-h-14 min-w-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] px-2 text-[10px] font-medium text-slate-300"
+	                onClick={() => {
+	                  setAddMenuOpen(false);
+	                  onAddLayer(item.type);
+	                }}
+	              >
+	                <Icon className="h-5 w-5" />
+	                {item.label}
+	              </button>
+	            );
+	          })}
+	          {[
             { label: "Split", icon: Scissors, action: "split" as const },
             { label: "Duplicate", icon: Copy, action: "duplicate" as const },
             { label: "Delete", icon: Trash2, action: "delete" as const },

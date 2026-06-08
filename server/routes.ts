@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream, getR2ConfigStatus } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
-import { ensureVideoAnalysisForAsset, VIDEO_ANALYSIS_MODEL, VIDEO_ANALYSIS_VERSION } from "./video-intelligence";
+import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt, VIDEO_ANALYSIS_MODEL, VIDEO_ANALYSIS_VERSION } from "./video-intelligence";
 import { renderTimelineVideo } from "./timeline-renderer";
 import { requireAuth, requireAdmin, hashPassword } from "./auth";
 import multer from "multer";
@@ -972,6 +972,7 @@ export async function registerRoutes(
       const brief = String(req.body.brief || "").trim();
       const durationSec = Number(req.body.durationSec || 30);
       const model = String(req.body.model || "gpt-4.1-mini");
+      const assetId = Number(req.body.assetId || 0);
 
       if (!brief) {
         return res.status(400).json({ error: "brief is required" });
@@ -982,17 +983,39 @@ export async function registerRoutes(
         return res.status(400).json({ error: "OpenAI or DeepSeek API key is not configured" });
       }
 
+      let videoAnalysisSummary = "";
+      if (assetId > 0) {
+        try {
+          const asset = await storage.getAsset(assetId);
+          if (asset && (req.user!.role === "admin" || asset.userId === req.user!.id)) {
+            const result = await ensureVideoAnalysisForAsset(asset, { timelineJson: asset.timelineJson as any });
+            videoAnalysisSummary = summarizeVideoAnalysisForPrompt(result.analysis);
+          }
+        } catch (analysisErr: any) {
+          console.warn("[editor-script] video analysis unavailable", {
+            assetId,
+            error: analysisErr?.message || String(analysisErr),
+          });
+        }
+      }
+
+      if (!videoAnalysisSummary && req.body.videoAnalysisSummary) {
+        videoAnalysisSummary = String(req.body.videoAnalysisSummary).slice(0, 12000);
+      }
+
       const response = await client.chat.completions.create({
         model,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content: `You are Buzzly, an AI Content Engine for TikTok and Reels. Create short-form video scripts in a Taglish creator tone. Return valid JSON only with keys: script, captions, hashtags. captions must be an array of 5 to 8 short subtitle lines. hashtags must be a copy-paste-ready string.`,
+            content: `You are Buzzly, an AI Content Engine for TikTok and Reels. Create short-form video scripts in a Taglish creator tone. Return valid JSON only with keys: script, captions, hashtags. captions must be an array of 5 to 8 short subtitle lines. hashtags must be a copy-paste-ready string.${videoAnalysisSummary ? " Reusable visual video analysis is provided; use its scene order, visible actions, pacing, hook moments, weak spots, shot categories, and voiceover beats as context under the user brief. If visuals are unclear, generate a best-effort script without inventing uncertain facts. Do not mention the analysis." : ""}`,
           },
           {
             role: "user",
-            content: `Create a ${durationSec}-second TikTok/Reels script for this brief:\n${brief}\n\nKeep the script punchy, practical, and easy to narrate. Do not include markdown.`,
+            content: videoAnalysisSummary
+              ? `Create a ${durationSec}-second TikTok/Reels script for this brief:\n${brief}\n\nReusable Video Intelligence Analysis:\n${videoAnalysisSummary}\n\nKeep the script punchy, practical, visually aligned, and easy to narrate. Do not include markdown.`
+              : `Create a ${durationSec}-second TikTok/Reels script for this brief:\n${brief}\n\nKeep the script punchy, practical, and easy to narrate. Do not include markdown.`,
           },
         ],
         temperature: 0.8,

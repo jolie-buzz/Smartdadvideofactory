@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors, Eye } from "lucide-react";
+import { Upload, Mic, Save, Loader2, Image, Film, RefreshCw, AlertTriangle, CheckCircle2, Brain, AudioLines, Music, Captions, Sparkles, Clapperboard, Trash2, Scissors, Eye, Play, Square } from "lucide-react";
 import VideoTrimmer from "./video-trimmer";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 import type { Asset, ScriptPrompt } from "@shared/schema";
@@ -24,6 +24,7 @@ interface Voice {
   voice_id: string;
   name: string;
   category: string;
+  preview_url?: string;
 }
 
 interface ElevenLabsModel {
@@ -91,6 +92,31 @@ const CATEGORY_COLORS: Record<string, string> = {
   BODY: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
   CTA: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
 };
+
+function summarizeAnalysisField(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 4)
+      .map((item) => summarizeAnalysisField(item))
+      .filter(Boolean)
+      .join(" | ");
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const timing = [record.start_sec, record.end_sec].every((part) => typeof part === "number")
+      ? `${record.start_sec}-${record.end_sec}s: `
+      : typeof record.at_sec === "number"
+        ? `${record.at_sec}s: `
+        : "";
+    const text = record.summary || record.description || record.action || record.beat || record.hook || record.label || record.type || record.category || record.note;
+    if (text) return `${timing}${summarizeAnalysisField(text)}`;
+    return JSON.stringify(record).slice(0, 180);
+  }
+  return "";
+}
 
 async function uploadFileWithProgress(
   file: File,
@@ -229,6 +255,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [video, setVideo] = useState<File | null>(null);
   const [voiceId, setVoiceId] = useState("");
   const [voiceName, setVoiceName] = useState("");
+  const [voiceSearch, setVoiceSearch] = useState("");
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
   const [openaiModel, setOpenaiModel] = useState("gpt-4.1");
   const [elevenlabsModel, setElevenlabsModel] = useState("eleven_turbo_v2_5");
   const [useEnhance, setUseEnhance] = useState(true);
@@ -272,6 +300,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [replaceMusicProgress, setReplaceMusicProgress] = useState(0);
   const [showVideoAnalysis, setShowVideoAnalysis] = useState(false);
   const [reanalyzingVideo, setReanalyzingVideo] = useState(false);
+  const voicePreviewRef = useRef<HTMLAudioElement | null>(null);
   const replacePhotoInputRef = useRef<HTMLInputElement>(null);
   const replaceVideoInputRef = useRef<HTMLInputElement>(null);
   const replaceMusicInputRef = useRef<HTMLInputElement>(null);
@@ -388,9 +417,26 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
   const videoAnalysis = videoAnalysisQuery.data?.analysis;
   const videoAnalysisJson = videoAnalysis?.analysisJson || null;
+  const videoAnalysisHighlights = videoAnalysisJson
+    ? [
+        ["Summary", videoAnalysisJson.overall_summary],
+        ["Product / subject", videoAnalysisJson.product_or_main_subject],
+        ["Best hook moments", videoAnalysisJson.suggested_hooks],
+        ["VO beats", videoAnalysisJson.voiceover_beats || videoAnalysisJson.script_timing_guidance],
+        ["Weak spots", videoAnalysisJson.weak_or_dead_spots],
+        ["Shot categories", videoAnalysisJson.shot_categories],
+      ]
+        .map(([label, value]) => ({ label: String(label), value: summarizeAnalysisField(value) }))
+        .filter((item) => item.value)
+    : [];
   const videoAnalysisModels = videoAnalysisQuery.data?.availableModels?.length
     ? videoAnalysisQuery.data.availableModels
     : OPENAI_MODELS;
+  const normalizedVoiceSearch = voiceSearch.trim().toLowerCase();
+  const filteredVoices = (voicesQuery.data || []).filter((voice) =>
+    !normalizedVoiceSearch || voice.name.toLowerCase().includes(normalizedVoiceSearch)
+  );
+  const selectedVoice = voicesQuery.data?.find((voice) => voice.voice_id === voiceId);
   const uploadedMusicOptions = (assetsQuery.data || [])
     .filter((asset) => asset.musicKey)
     .map((asset) => ({ key: asset.musicKey!, label: asset.name }));
@@ -400,6 +446,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setVideoAnalysisModel(videoAnalysisQuery.data.modelUsed);
     }
   }, [videoAnalysisQuery.data?.modelUsed]);
+
+  useEffect(() => {
+    return () => {
+      voicePreviewRef.current?.pause();
+      voicePreviewRef.current = null;
+    };
+  }, []);
 
   const handleUploadSource = async (file: File) => {
     setSourceUploading(true);
@@ -760,6 +813,40 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     setVoiceId(id);
     const voice = voicesQuery.data?.find((v) => v.voice_id === id);
     setVoiceName(voice?.name || "");
+  };
+
+  const stopVoicePreview = () => {
+    voicePreviewRef.current?.pause();
+    voicePreviewRef.current = null;
+    setPreviewingVoiceId(null);
+  };
+
+  const handlePreviewVoice = async (voice: Voice) => {
+    if (previewingVoiceId === voice.voice_id) {
+      stopVoicePreview();
+      return;
+    }
+
+    stopVoicePreview();
+    if (!voice.preview_url) {
+      toast({ title: "Preview not available", description: "ElevenLabs did not provide a sample URL for this voice." });
+      return;
+    }
+
+    try {
+      const audio = new Audio(voice.preview_url);
+      voicePreviewRef.current = audio;
+      setPreviewingVoiceId(voice.voice_id);
+      audio.onended = () => setPreviewingVoiceId(null);
+      audio.onerror = () => {
+        setPreviewingVoiceId(null);
+        toast({ title: "Preview failed", description: "The ElevenLabs sample could not be played.", variant: "destructive" });
+      };
+      await audio.play();
+    } catch (err: any) {
+      setPreviewingVoiceId(null);
+      toast({ title: "Preview failed", description: err.message || "The ElevenLabs sample could not be played.", variant: "destructive" });
+    }
   };
 
   const handleReplaceFile = async (file: File, type: "photo" | "video" | "music") => {
@@ -1174,6 +1261,16 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                       <span>Updated {new Date(videoAnalysis.updatedAt).toLocaleString()}</span>
                     </div>
                   )}
+                  {videoAnalysisHighlights.length > 0 && (
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {videoAnalysisHighlights.map((item) => (
+                        <div key={item.label} className="rounded-md border bg-muted/40 p-3">
+                          <p className="text-[11px] font-medium uppercase text-muted-foreground">{item.label}</p>
+                          <p className="mt-1 line-clamp-3 text-sm">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {showVideoAnalysis && videoAnalysisJson && (
                     <div className="max-h-72 overflow-auto rounded-md bg-muted p-3 text-xs">
                       <pre className="whitespace-pre-wrap font-mono">
@@ -1348,32 +1445,85 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               <Mic className="w-4 h-4" />
               Voice Selection
             </h3>
-            <div className="flex gap-2 items-end">
-              <div className="flex-1 space-y-2">
-                <Label>ElevenLabs Voice</Label>
-                <Select value={voiceId} onValueChange={handleVoiceSelect} disabled={isUploading || voicesQuery.isLoading || !voicesQuery.data?.length}>
-                  <SelectTrigger data-testid="select-voice">
-                    <SelectValue placeholder={voicesQuery.isLoading ? "Loading voices..." : voicesQuery.data?.length ? "Select a voice..." : "No voices available"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {voicesQuery.data?.map((v) => (
-                      <SelectItem key={v.voice_id} value={v.voice_id}>
-                        {v.name} ({v.category})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <div className="space-y-3">
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="voice-search">ElevenLabs Voice</Label>
+                  <Input
+                    id="voice-search"
+                    value={voiceSearch}
+                    onChange={(event) => setVoiceSearch(event.target.value)}
+                    placeholder={voicesQuery.isLoading ? "Loading voices..." : "Search voice name..."}
+                    disabled={isUploading || voicesQuery.isLoading || !voicesQuery.data?.length}
+                    data-testid="input-voice-search"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => voicesQuery.refetch()}
+                  disabled={isUploading || voicesQuery.isFetching}
+                  data-testid="button-load-voices"
+                  size="icon"
+                  title="Refresh voices"
+                >
+                  {voicesQuery.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                </Button>
               </div>
-              <Button
-                variant="secondary"
-                onClick={() => voicesQuery.refetch()}
-                disabled={isUploading || voicesQuery.isFetching}
-                data-testid="button-load-voices"
-                size="icon"
-                title="Refresh voices"
-              >
-                {voicesQuery.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              </Button>
+
+              {selectedVoice && (
+                <p className="text-xs text-muted-foreground">
+                  Selected: <span className="font-medium text-foreground">{selectedVoice.name}</span> ({selectedVoice.category})
+                </p>
+              )}
+
+              <div className="max-h-64 overflow-auto rounded-md border bg-background">
+                {voicesQuery.isLoading && (
+                  <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading voices...
+                  </div>
+                )}
+                {!voicesQuery.isLoading && filteredVoices.length === 0 && (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {voicesQuery.data?.length ? "No voices found." : "No voices available."}
+                  </p>
+                )}
+                {filteredVoices.map((voice) => {
+                  const isSelected = voice.voice_id === voiceId;
+                  const isPreviewing = previewingVoiceId === voice.voice_id;
+                  return (
+                    <div
+                      key={voice.voice_id}
+                      className={`flex items-center justify-between gap-3 border-b p-3 last:border-b-0 ${isSelected ? "bg-primary/10" : "hover:bg-muted/60"}`}
+                    >
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => handleVoiceSelect(voice.voice_id)}
+                        disabled={isUploading}
+                        data-testid="button-select-voice"
+                      >
+                        <p className="truncate text-sm font-medium">{voice.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{voice.category}</p>
+                      </button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-2"
+                        onClick={() => handlePreviewVoice(voice)}
+                        disabled={isUploading || (!voice.preview_url && !isPreviewing)}
+                        title={voice.preview_url ? "Preview voice" : "Preview not available"}
+                        data-testid="button-preview-voice"
+                      >
+                        {isPreviewing ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        {isPreviewing ? "Stop" : voice.preview_url ? "Preview" : "No preview"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 

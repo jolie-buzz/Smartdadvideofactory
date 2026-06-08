@@ -122,7 +122,7 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
     .flatMap((track) => track.items.map((item) => ({ item, muted: track.muted })))
     .filter(({ item, muted }) => !muted && isActiveAtTime(item, currentTime));
 
-  const visualItems = activeItems.filter(({ item }) => item.type !== "audio");
+  const visualItems = activeItems.filter(({ item }) => item.type !== "audio").reverse();
   const activeAudioItems = activeItems.filter(({ item }) => item.type === "audio").map(({ item }) => item);
   const realAudioItems = activeAudioItems.filter((item) => item.source?.uri);
   const placeholderAudioItems = activeAudioItems.filter((item) => !item.source?.uri);

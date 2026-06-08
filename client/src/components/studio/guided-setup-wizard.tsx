@@ -11,6 +11,7 @@ import {
   Loader2,
   Mic,
   Music,
+  Play,
   RefreshCw,
   Sparkles,
   Square,
@@ -241,9 +242,10 @@ export function GuidedSetupWizard({
   const [cloneFiles, setCloneFiles] = useState<File[]>([]);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [isCloningVoice, setIsCloningVoice] = useState(false);
-  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
-  const [voicePreviewUrl, setVoicePreviewUrl] = useState("");
+  const [voiceSearch, setVoiceSearch] = useState("");
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
   const cloneFileInputRef = useRef<HTMLInputElement | null>(null);
+  const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceRecorderStreamRef = useRef<MediaStream | null>(null);
   const voiceRecorderChunksRef = useRef<Blob[]>([]);
@@ -268,6 +270,10 @@ export function GuidedSetupWizard({
     () => voicesQuery.data?.find((voice) => voice.voice_id === setupState.voiceId),
     [setupState.voiceId, voicesQuery.data],
   );
+  const filteredVoices = useMemo(() => {
+    const query = voiceSearch.trim().toLowerCase();
+    return (voicesQuery.data || []).filter((voice) => !query || voice.name.toLowerCase().includes(query));
+  }, [voiceSearch, voicesQuery.data]);
   const cloneFilePreviews = useMemo(
     () => cloneFiles.map((file) => ({ file, url: URL.createObjectURL(file) })),
     [cloneFiles],
@@ -281,9 +287,10 @@ export function GuidedSetupWizard({
 
   useEffect(() => {
     return () => {
-      if (voicePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(voicePreviewUrl);
+      voicePreviewAudioRef.current?.pause();
+      voicePreviewAudioRef.current = null;
     };
-  }, [voicePreviewUrl]);
+  }, []);
 
   const updateState = (patch: Partial<GuidedSetupState>) => {
     onSetupStateChange({ ...setupState, ...patch });
@@ -311,12 +318,17 @@ export function GuidedSetupWizard({
 
   const handleVoiceSelect = (voiceId: string) => {
     const selectedVoice = voicesQuery.data?.find((voice) => voice.voice_id === voiceId);
-    setVoicePreviewUrl(selectedVoice?.preview_url || "");
     updateState({
       voiceId,
       voiceName: selectedVoice ? `${selectedVoice.name} (${selectedVoice.category})` : voiceId,
       voiceMode: "AI voiceover",
     });
+  };
+
+  const stopVoicePreview = () => {
+    voicePreviewAudioRef.current?.pause();
+    voicePreviewAudioRef.current = null;
+    setPreviewingVoiceId(null);
   };
 
   const addCloneFiles = (files: File[]) => {
@@ -400,36 +412,31 @@ export function GuidedSetupWizard({
   const cloneVoiceName = cloneName.trim() || cloneDescription.trim();
   const cloneVoiceDescription = cloneName.trim() ? cloneDescription.trim() : "";
 
-  const handlePreviewSelectedVoice = async () => {
-    if (!setupState.voiceId || isPreviewingVoice) return;
-
-    if (selectedVoice?.preview_url) {
-      setVoicePreviewUrl(selectedVoice.preview_url);
+  const handlePreviewVoice = async (voice: ElevenLabsVoice) => {
+    if (previewingVoiceId === voice.voice_id) {
+      stopVoicePreview();
       return;
     }
 
-    setIsPreviewingVoice(true);
+    stopVoicePreview();
+    if (!voice.preview_url) {
+      toast({ title: "Preview not available", description: "ElevenLabs did not provide a sample URL for this voice." });
+      return;
+    }
+
     try {
-      const response = await fetch("/api/editor/generate-voiceover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          voiceId: setupState.voiceId,
-          modelId: setupState.elevenlabsModel,
-          text: "Hi, this is a quick preview of this voice for your video.",
-        }),
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to preview voice");
-      }
-      const audioBlob = await response.blob();
-      setVoicePreviewUrl(URL.createObjectURL(audioBlob));
+      const audio = new Audio(voice.preview_url);
+      voicePreviewAudioRef.current = audio;
+      setPreviewingVoiceId(voice.voice_id);
+      audio.onended = () => setPreviewingVoiceId(null);
+      audio.onerror = () => {
+        setPreviewingVoiceId(null);
+        toast({ title: "Voice preview failed", description: "The ElevenLabs sample could not be played.", variant: "destructive" });
+      };
+      await audio.play();
     } catch (error: any) {
-      toast({ title: "Voice preview failed", description: error.message || "Please try another voice.", variant: "destructive" });
-    } finally {
-      setIsPreviewingVoice(false);
+      setPreviewingVoiceId(null);
+      toast({ title: "Voice preview failed", description: error.message || "The ElevenLabs sample could not be played.", variant: "destructive" });
     }
   };
 
@@ -741,34 +748,63 @@ export function GuidedSetupWizard({
 
                 <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
                   <div className="space-y-2">
-                    <Label>Voice</Label>
-                    <div className="flex gap-2">
-                      <Select value={setupState.voiceId} onValueChange={handleVoiceSelect} disabled={voicesQuery.isLoading || !voicesQuery.data?.length}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={voicesQuery.isLoading ? "Loading voices..." : voicesQuery.data?.length ? "Select a voice..." : "No voices available"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {voicesQuery.data?.map((voice) => (
-                            <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                              {voice.name} ({voice.category})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0 gap-2"
-                        onClick={handlePreviewSelectedVoice}
-                        disabled={!setupState.voiceId || isPreviewingVoice}
-                      >
-                        {isPreviewingVoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <AudioLines className="h-4 w-4" />}
-                        Preview
-                      </Button>
-                    </div>
-                    {voicePreviewUrl && (
-                      <audio key={voicePreviewUrl} controls src={voicePreviewUrl} className="h-9 w-full" />
+                    <Label htmlFor="guided-voice-search">Voice</Label>
+                    <Input
+                      id="guided-voice-search"
+                      value={voiceSearch}
+                      onChange={(event) => setVoiceSearch(event.target.value)}
+                      placeholder={voicesQuery.isLoading ? "Loading voices..." : "Search voice name..."}
+                      disabled={voicesQuery.isLoading || !voicesQuery.data?.length}
+                    />
+                    {selectedVoice && (
+                      <p className="text-xs text-muted-foreground">
+                        Selected: <span className="font-medium text-foreground">{selectedVoice.name}</span> ({selectedVoice.category})
+                      </p>
                     )}
+                    <div className="max-h-48 overflow-auto rounded-md border bg-background">
+                      {voicesQuery.isLoading && (
+                        <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading voices...
+                        </div>
+                      )}
+                      {!voicesQuery.isLoading && filteredVoices.length === 0 && (
+                        <p className="p-3 text-sm text-muted-foreground">
+                          {voicesQuery.data?.length ? "No voices found." : "No voices available."}
+                        </p>
+                      )}
+                      {filteredVoices.map((voice) => {
+                        const isSelected = voice.voice_id === setupState.voiceId;
+                        const isPreviewing = previewingVoiceId === voice.voice_id;
+                        return (
+                          <div
+                            key={voice.voice_id}
+                            className={`flex items-center justify-between gap-3 border-b p-3 last:border-b-0 ${isSelected ? "bg-primary/10" : "hover:bg-muted/60"}`}
+                          >
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left"
+                              onClick={() => handleVoiceSelect(voice.voice_id)}
+                            >
+                              <p className="truncate text-sm font-medium">{voice.name}</p>
+                              <p className="truncate text-xs text-muted-foreground">{voice.category}</p>
+                            </button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 gap-2"
+                              onClick={() => handlePreviewVoice(voice)}
+                              disabled={!voice.preview_url && !isPreviewing}
+                              title={voice.preview_url ? "Preview voice" : "Preview not available"}
+                            >
+                              {isPreviewing ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                              {isPreviewing ? "Stop" : voice.preview_url ? "Preview" : "No preview"}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="space-y-2">

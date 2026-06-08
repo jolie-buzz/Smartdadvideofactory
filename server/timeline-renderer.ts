@@ -1,6 +1,6 @@
 import ffmpegStatic from "ffmpeg-static";
 import { spawn } from "child_process";
-import { mkdtemp, rm, writeFile } from "fs/promises";
+import { mkdtemp, rm } from "fs/promises";
 import { basename, join } from "path";
 import { tmpdir } from "os";
 import { downloadFileFromR2, uploadFileToR2 } from "./r2";
@@ -22,9 +22,17 @@ type TimelineItem = {
   trimStart?: number;
   trimEnd?: number;
   playbackRate?: number;
+  position?: { x?: number; y?: number };
+  frameSize?: { width?: number; height?: number };
+  mediaFit?: "contain" | "cover";
+  scale?: number;
+  opacity?: number;
 };
 
 type TimelineJson = {
+  project?: {
+    duration?: number;
+  };
   tracks?: Array<{
     id?: string;
     type?: string;
@@ -35,11 +43,6 @@ type TimelineJson = {
 const STUDIO_RENDER_WIDTH = Math.max(360, parseInt(process.env.STUDIO_RENDER_WIDTH || "720", 10));
 const STUDIO_RENDER_HEIGHT = Math.max(640, parseInt(process.env.STUDIO_RENDER_HEIGHT || "1280", 10));
 const STUDIO_RENDER_PRESET = process.env.STUDIO_RENDER_PRESET || "veryfast";
-
-const fitToStudioFrameFilter = (setPts: string) => (
-  `scale=${STUDIO_RENDER_WIDTH}:${STUDIO_RENDER_HEIGHT}:force_original_aspect_ratio=decrease,` +
-  `pad=${STUDIO_RENDER_WIDTH}:${STUDIO_RENDER_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,${setPts}`
-);
 
 const roundTime = (value: number) => Number(value.toFixed(3));
 
@@ -70,8 +73,6 @@ function runFfmpeg(args: string[], timeoutMs = 600_000): Promise<void> {
     });
   });
 }
-
-const quoteConcatPath = (filePath: string) => `file '${filePath.replace(/'/g, "'\\''")}'`;
 
 const itemCanUseAssetVideo = (item: TimelineItem, assetId: number, assetVideoKey?: string | null) => {
   if (!assetVideoKey) return false;
@@ -127,9 +128,34 @@ const logTimelineRenderInputs = (assetId: number, timelineJson: TimelineJson, as
 };
 
 const getTimelineVideoItems = (timelineJson: TimelineJson, assetId: number, assetVideoKey?: string | null) => (
-  getTimelineItems(timelineJson)
-    .filter((item) => item.type === "video" && Boolean(getRenderableSourceKey(item, assetId, assetVideoKey)))
-    .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+  (timelineJson.tracks || [])
+    .flatMap((track, trackIndex) => (track.items || []).map((item) => ({ item, trackIndex })))
+    .filter(({ item }) => item.type === "video" && Boolean(getRenderableSourceKey(item, assetId, assetVideoKey)))
+    .sort((a, b) => {
+      if (a.trackIndex !== b.trackIndex) return b.trackIndex - a.trackIndex;
+      return (a.item.startTime || 0) - (b.item.startTime || 0);
+    })
+);
+
+const getTimelineDuration = (timelineJson: TimelineJson) => Math.max(
+  0.1,
+  Number(timelineJson.project?.duration || 0),
+  ...getTimelineItems(timelineJson).map((item) => Number(item.startTime || 0) + Number(item.duration || 0)),
+);
+
+const getClipFrame = (item: TimelineItem) => {
+  const scale = Math.max(0.05, Number(item.scale || 1));
+  const frameWidth = Math.max(2, Math.round(STUDIO_RENDER_WIDTH * Math.max(0.05, Number(item.frameSize?.width || 1)) * scale));
+  const frameHeight = Math.max(2, Math.round(STUDIO_RENDER_HEIGHT * Math.max(0.05, Number(item.frameSize?.height || 1)) * scale));
+  const x = Math.round(STUDIO_RENDER_WIDTH * Math.max(0, Math.min(1, Number(item.position?.x ?? 0.5))) - frameWidth / 2);
+  const y = Math.round(STUDIO_RENDER_HEIGHT * Math.max(0, Math.min(1, Number(item.position?.y ?? 0.5))) - frameHeight / 2);
+  return { frameWidth, frameHeight, x, y };
+};
+
+const fitClipFilter = (item: TimelineItem, frameWidth: number, frameHeight: number) => (
+  item.mediaFit === "contain"
+    ? `scale=${frameWidth}:${frameHeight}:force_original_aspect_ratio=decrease,pad=${frameWidth}:${frameHeight}:(ow-iw)/2:(oh-ih)/2:black`
+    : `scale=${frameWidth}:${frameHeight}:force_original_aspect_ratio=increase,crop=${frameWidth}:${frameHeight}`
 );
 
 export async function renderTimelineVideo(assetId: number, timelineJson: TimelineJson): Promise<string> {
@@ -143,15 +169,20 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
   const workDir = await mkdtemp(join(tmpdir(), `timeline-${assetId}-`));
 
   try {
-    const renderedClips: string[] = [];
+    const ffmpegArgs = [
+      "-y",
+      "-f", "lavfi",
+      "-i", `color=c=black:s=${STUDIO_RENDER_WIDTH}x${STUDIO_RENDER_HEIGHT}:r=30:d=${getTimelineDuration(timelineJson)}`,
+    ];
+    const filterParts = ["[0:v]format=rgba[base0]"];
+    let renderedInputCount = 0;
 
     for (let index = 0; index < videoItems.length; index++) {
-      const item = videoItems[index];
+      const item = videoItems[index].item;
       const sourceKey = getRenderableSourceKey(item, assetId, asset?.videoKey);
       if (!sourceKey) continue;
 
       const inputPath = join(workDir, `input_${index}.mp4`);
-      const outputPath = join(workDir, `clip_${index}.mp4`);
       await downloadFileFromR2(sourceKey, inputPath);
 
       const trimStart = Math.max(0, Number(item.trimStart || 0));
@@ -166,36 +197,32 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
           ? Math.min(timelineMediaDuration, trimmedMediaDuration)
           : timelineMediaDuration || trimmedMediaDuration || 5,
       ));
-      const setPts = playbackRate === 1 ? "setpts=PTS" : `setpts=${(1 / playbackRate).toFixed(4)}*PTS`;
+      const timelineStart = Math.max(0, Number(item.startTime || 0));
+      const outputDuration = roundTime(Math.max(0.1, sourceDuration / playbackRate));
+      const timelineEnd = roundTime(timelineStart + outputDuration);
+      const ffmpegInputIndex = renderedInputCount + 1;
+      const { frameWidth, frameHeight, x, y } = getClipFrame(item);
+      const setPts = `setpts=${(1 / playbackRate).toFixed(4)}*(PTS-STARTPTS)+${timelineStart}/TB`;
+      const opacity = Math.max(0, Math.min(1, Number(item.opacity ?? 1)));
 
-      await runFfmpeg([
-        "-y",
-        "-ss", String(trimStart),
-        "-t", String(sourceDuration),
-        "-i", inputPath,
-        "-vf", fitToStudioFrameFilter(setPts),
-        "-r", "30",
-        "-c:v", "libx264", "-preset", STUDIO_RENDER_PRESET, "-crf", "24",
-        "-threads", "1",
-        "-pix_fmt", "yuv420p",
-        "-an",
-        outputPath,
-      ]);
-
-      renderedClips.push(outputPath);
+      ffmpegArgs.push("-ss", String(trimStart), "-t", String(sourceDuration), "-i", inputPath);
+      filterParts.push(
+        `[${ffmpegInputIndex}:v]${setPts},${fitClipFilter(item, frameWidth, frameHeight)},format=rgba,colorchannelmixer=aa=${opacity.toFixed(3)}[clip${renderedInputCount}]`,
+        `[base${renderedInputCount}][clip${renderedInputCount}]overlay=${x}:${y}:enable='between(t,${timelineStart},${timelineEnd})':eof_action=pass:shortest=0[base${renderedInputCount + 1}]`,
+      );
+      renderedInputCount++;
     }
 
-    if (renderedClips.length === 0) {
+    if (renderedInputCount === 0) {
       throw new Error("Studio timeline clips could not be rendered");
     }
 
-    const concatPath = join(workDir, "concat.txt");
-    await writeFile(concatPath, renderedClips.map(quoteConcatPath).join("\n"));
-
     const outputPath = join(workDir, "studio-timeline.mp4");
     await runFfmpeg([
-      "-y",
-      "-f", "concat", "-safe", "0", "-i", concatPath,
+      ...ffmpegArgs,
+      "-filter_complex", filterParts.join(";"),
+      "-map", `[base${renderedInputCount}]`,
+      "-t", String(getTimelineDuration(timelineJson)),
       "-c:v", "libx264", "-preset", STUDIO_RENDER_PRESET, "-crf", "24",
       "-threads", "1",
       "-pix_fmt", "yuv420p",

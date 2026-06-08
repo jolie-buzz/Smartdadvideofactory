@@ -8,7 +8,7 @@ import { storage } from "./storage";
 import { downloadFileFromR2, hashFileSha256 } from "./r2";
 import type { Asset, VideoAnalysis } from "@shared/schema";
 
-export const VIDEO_ANALYSIS_VERSION = "video-intelligence-v1";
+export const VIDEO_ANALYSIS_VERSION = "video-intelligence-v2";
 export const VIDEO_ANALYSIS_MODEL = process.env.VIDEO_ANALYSIS_MODEL || "gpt-4o";
 
 type AnalysisTarget = {
@@ -91,10 +91,9 @@ async function extractKeyframes(inputPath: string): Promise<KeyframeSample[]> {
       "-y",
       "-i", inputPath,
       "-vf", "fps=1/2,scale=640:-1",
-      "-frames:v", "8",
       "-q:v", "3",
       join(workDir, "frame_%02d.jpg"),
-    ]);
+    ], 600_000);
 
     const files = (await readdir(workDir))
       .filter((file) => /^frame_\d+\.jpg$/.test(file))
@@ -155,9 +154,12 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
         content: [
           "You are Buzzly/Brandy's reusable Video Intelligence Layer.",
           "Analyze product/social video keyframes once, then return reusable production intelligence as strict JSON.",
+          "The keyframes are sampled every 2 seconds across the full uploaded video. Analyze the whole visual sequence, not only the first few frames.",
+          "Use visual evidence only for now. Do not invent audio, dialogue, or unseen claims.",
           "Return concise but useful arrays. Do not include markdown.",
-          "The user needs time-aware analysis. Every scene, important moment, hook, sound effect, transition, caption, and cut point should include start_sec/end_sec or at_sec whenever possible.",
-          "Required JSON keys: overall_summary, product_or_main_subject, timeline_seconds, scenes, visible_actions, detected_text_ocr, emotional_tone, pacing, important_moments, suggested_hooks, suggested_sound_effects, suggested_transitions, suggested_captions_overlay_text, suggested_cut_points, possible_product_benefits_shown_visually, script_timing_guidance.",
+          "The user needs time-aware analysis. Group adjacent samples into practical beats, but do not force rigid timing when the visuals are unclear.",
+          "Every scene, important moment, hook, weak spot, shot category, transition, caption, cut point, and voiceover beat should include start_sec/end_sec or at_sec whenever possible.",
+          "Required JSON keys: overall_summary, product_or_main_subject, timeline_seconds, scenes, visible_actions, detected_text_ocr, emotional_tone, pacing, important_moments, suggested_hooks, weak_or_dead_spots, shot_categories, suggested_sound_effects, suggested_transitions, suggested_captions_overlay_text, suggested_cut_points, possible_product_benefits_shown_visually, script_timing_guidance, voiceover_beats.",
         ].join(" "),
       },
       {
@@ -171,12 +173,13 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
               timelineScenes.length
                 ? `Studio timeline clip map: ${JSON.stringify(timelineScenes)}`
                 : "No Studio timeline clip map is available; infer timing from keyframe timestamps.",
-              "For script_timing_guidance, recommend short narration beats that align with the visible shot seconds.",
+              "For script_timing_guidance and voiceover_beats, recommend short narration beats that align with the visible shot seconds.",
+              "If the product or action is unclear, still return best-effort visual context and note uncertainty inside the relevant fields.",
             ].join("\n"),
           },
           ...keyframes.map((frame) => ({
             type: "image_url",
-            image_url: { url: frame.dataUrl },
+            image_url: { url: frame.dataUrl, detail: "low" },
           })),
         ] as any,
       },
@@ -250,5 +253,5 @@ export async function ensureVideoAnalysisForAsset(
 
 export function summarizeVideoAnalysisForPrompt(analysis?: VideoAnalysis | null): string {
   if (!analysis?.analysisJson) return "";
-  return JSON.stringify(analysis.analysisJson).slice(0, 6000);
+  return JSON.stringify(analysis.analysisJson).slice(0, 12000);
 }

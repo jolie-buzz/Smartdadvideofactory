@@ -84,7 +84,6 @@ export function sanitizeNarrationScript(input: string | null | undefined) {
       continue;
     }
 
-    if (mode === "drop") continue;
     if (/^#+\w/.test(line)) continue;
     if (/^(overlay|b[- ]?roll|caption|hashtags?|seo|keywords?)\s*[:：]/i.test(line)) break;
 

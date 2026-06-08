@@ -182,10 +182,12 @@ const getInitialMobileTimelineHeight = () => {
   return Number.isFinite(stored) ? clampNumber(stored, 24, 52) : 34;
 };
 
-const defaultVisualFrame = (type: BuzzlyTimelineItem["type"]) => {
+type VisualFrameDefaults = Pick<BuzzlyTimelineItem, "scale"> & Partial<Pick<BuzzlyTimelineItem, "frameSize" | "mediaFit">>;
+
+const defaultVisualFrame = (type: BuzzlyTimelineItem["type"]): VisualFrameDefaults => {
   if (type === "video") return { frameSize: { width: 1, height: 1 }, mediaFit: "cover" as const, scale: 1 };
   if (type === "image") return { frameSize: { width: 0.86, height: 0.86 }, mediaFit: "contain" as const, scale: 1 };
-  return {};
+  return { scale: 1 };
 };
 
 function effectPatchForPreset(preset: NonNullable<BuzzlyTimelineItem["effectPreset"]>): Partial<BuzzlyTimelineItem> {
@@ -2178,14 +2180,13 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       };
     });
 
-    const imageItems: BuzzlyTimelineItem[] = [
-      ...(draft.productPhoto ? [{
+    const productPhotoItem: BuzzlyTimelineItem | null = draft.productPhoto ? {
         id: "guided-product-photo",
-        type: "image" as const,
+        type: "image",
         name: "AI-analyzed product photo",
         trackId: "image-overlays",
         source: {
-          kind: "local" as const,
+          kind: "local",
           uri: photoUrl,
           filename: draft.productPhoto.name,
           mimeType: draft.productPhoto.type || "image/png",
@@ -2200,7 +2201,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         mediaFit: "contain",
         scale: 0.72,
         opacity: 0.96,
-      }] : []),
+      } : null;
+
+    const imageItems: BuzzlyTimelineItem[] = [
+      ...(productPhotoItem ? [productPhotoItem] : []),
       {
         id: "guided-ai-broll",
         type: "image",
@@ -2830,7 +2834,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                 onClick={() => {
                   if (opensSheet) {
                     setActiveRail(item.id);
-                    setMobileTool((current) => current === item.id ? null : item.id);
+                    setMobileTool((current) => current === item.id ? null : item.id as MobileToolId);
                     return;
                   }
                   if (item.id === "studio") {

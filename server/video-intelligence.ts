@@ -101,7 +101,8 @@ async function extractKeyframes(inputPath: string): Promise<KeyframeSample[]> {
       .sort();
 
     const samples: KeyframeSample[] = [];
-    for (const [index, file] of files.entries()) {
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
       const frame = await readFile(join(workDir, file));
       samples.push({
         timeSec: index * 2,

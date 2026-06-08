@@ -1,5 +1,5 @@
 import { storage } from "./storage";
-import { uploadToR2, uploadFileToR2, downloadFromR2, getSignedDownloadUrl } from "./r2";
+import { uploadToR2, uploadFileToR2, downloadFromR2, downloadFileFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { renderTimelineVideo } from "./timeline-renderer";
 import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt } from "./video-intelligence";
@@ -189,6 +189,14 @@ function shouldFallbackFromTtsError(error: unknown): boolean {
   return error.status === 401 && error.body.includes("detected_unusual_activity");
 }
 
+function sanitizeFfmpegOutput(output: string): string {
+  return output.replace(/https?:\/\/\S+/g, "[URL]");
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegStatic || "ffmpeg", args);
@@ -198,15 +206,18 @@ function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string>
     const timer = setTimeout(() => {
       killed = true;
       proc.kill("SIGKILL");
-      reject(new Error(`ffmpeg timed out after ${timeoutMs / 1000}s. Last output: ${stderr.slice(-500)}`));
+      reject(new Error(`ffmpeg timed out after ${timeoutMs / 1000}s. Last output: ${sanitizeFfmpegOutput(stderr).slice(-500)}`));
     }, timeoutMs);
 
     proc.stderr.on("data", (d) => (stderr += d.toString()));
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       clearTimeout(timer);
       if (killed) return;
       if (code === 0) resolve(stderr);
-      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-1000)}`));
+      else {
+        const exitReason = code === null ? `signal ${signal || "unknown"}` : `code ${code}`;
+        reject(new Error(`ffmpeg exited with ${exitReason}: ${sanitizeFfmpegOutput(stderr).slice(-1000)}`));
+      }
     });
     proc.on("error", (err) => {
       clearTimeout(timer);
@@ -667,16 +678,30 @@ async function processJob(jobId: number): Promise<void> {
     await storage.appendJobLog(jobId, `Running combined FFmpeg pass (silenceremove + mix) + uploading raw audio in parallel...`);
 
     const finalPath = join(workDir, "final.mp4");
+    const combineSettings = {
+      thresholdDb: asset.thresholdDb,
+      removeSilencesLongerThan: asset.removeSilencesLongerThan,
+      ignoreDetectionsShorterThan: asset.ignoreDetectionsShorterThan,
+      voiceVolume: asset.voiceVolume,
+      musicVolume: asset.musicVolume,
+    };
+    const renderFinalVideo = async () => {
+      try {
+        await combineAllInOne(shouldMixVoice ? voiceRawPath : null, videoUrl, musicUrl, finalPath, combineSettings);
+      } catch (err) {
+        await storage.appendJobLog(
+          jobId,
+          `FFmpeg stream pass failed (${describeError(err)}). Downloading source video and retrying locally...`,
+        );
+        const localVideoPath = join(workDir, "source_video.mp4");
+        await downloadFileFromR2(asset.videoKey, localVideoPath);
+        await combineAllInOne(shouldMixVoice ? voiceRawPath : null, localVideoPath, musicUrl, finalPath, combineSettings);
+      }
+    };
 
     await Promise.all([
       uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
-      combineAllInOne(shouldMixVoice ? voiceRawPath : null, videoUrl, musicUrl, finalPath, {
-        thresholdDb: asset.thresholdDb,
-        removeSilencesLongerThan: asset.removeSilencesLongerThan,
-        ignoreDetectionsShorterThan: asset.ignoreDetectionsShorterThan,
-        voiceVolume: asset.voiceVolume,
-        musicVolume: asset.musicVolume,
-      }),
+      renderFinalVideo(),
     ]);
 
     await storage.updateJob(jobId, { audioRawKey });

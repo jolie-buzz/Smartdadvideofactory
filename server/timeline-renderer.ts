@@ -41,6 +41,8 @@ const fitToStudioFrameFilter = (setPts: string) => (
   `pad=${STUDIO_RENDER_WIDTH}:${STUDIO_RENDER_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,${setPts}`
 );
 
+const roundTime = (value: number) => Number(value.toFixed(3));
+
 function runFfmpeg(args: string[], timeoutMs = 600_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegStatic || "ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -155,14 +157,21 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
       const trimStart = Math.max(0, Number(item.trimStart || 0));
       const timelineDuration = Number(item.duration || 0);
       const trimEnd = Number(item.trimEnd || 0);
-      const duration = Math.max(0.1, timelineDuration || (trimEnd > trimStart ? trimEnd - trimStart : 5));
       const playbackRate = Math.max(0.25, Math.min(4, Number(item.playbackRate || 1)));
+      const trimmedMediaDuration = trimEnd > trimStart ? trimEnd - trimStart : 0;
+      const timelineMediaDuration = timelineDuration > 0 ? timelineDuration * playbackRate : 0;
+      const sourceDuration = roundTime(Math.max(
+        0.1,
+        timelineMediaDuration && trimmedMediaDuration
+          ? Math.min(timelineMediaDuration, trimmedMediaDuration)
+          : timelineMediaDuration || trimmedMediaDuration || 5,
+      ));
       const setPts = playbackRate === 1 ? "setpts=PTS" : `setpts=${(1 / playbackRate).toFixed(4)}*PTS`;
 
       await runFfmpeg([
         "-y",
         "-ss", String(trimStart),
-        "-t", String(duration),
+        "-t", String(sourceDuration),
         "-i", inputPath,
         "-vf", fitToStudioFrameFilter(setPts),
         "-r", "30",

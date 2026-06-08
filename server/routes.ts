@@ -57,6 +57,8 @@ const compactMediaError = (err: any) => ({
 const publicMediaUrlFromKey = (key?: string | null) => (
   key?.startsWith("public:") ? key.slice("public:".length) : null
 );
+const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] || "" : value || "";
+const routeParamInt = (value: string | string[] | undefined) => parseInt(routeParam(value), 10);
 
 const pipeR2Media = async (
   res: Response,
@@ -612,7 +614,7 @@ export async function registerRoutes(
 
   app.get("/api/assets/:id", requireAuth, async (req, res) => {
     try {
-      const asset = await storage.getAsset(parseInt(req.params.id));
+      const asset = await storage.getAsset(routeParamInt(req.params.id));
       if (!asset) return res.status(404).json({ error: "Asset not found" });
       res.json(asset);
     } catch (err: any) {
@@ -622,7 +624,7 @@ export async function registerRoutes(
 
   app.patch("/api/assets/:id", requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeParamInt(req.params.id);
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
@@ -671,7 +673,7 @@ export async function registerRoutes(
 
   app.post("/api/assets/:id/duplicate", requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeParamInt(req.params.id);
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
@@ -839,7 +841,7 @@ export async function registerRoutes(
 
   app.delete("/api/assets/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteAsset(parseInt(req.params.id));
+      await storage.deleteAsset(routeParamInt(req.params.id));
       res.status(204).send();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -848,7 +850,7 @@ export async function registerRoutes(
 
   app.get("/api/assets/:id/photo", requireAuth, async (req, res) => {
     try {
-      const asset = await storage.getAsset(parseInt(req.params.id));
+      const asset = await storage.getAsset(routeParamInt(req.params.id));
       if (!asset) return res.status(404).json({ error: "Asset not found" });
       const url = await getSignedDownloadUrl(asset.photoKey);
       res.json({ url });
@@ -1133,7 +1135,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       res.json(job);
     } catch (err: any) {
@@ -1152,7 +1154,7 @@ export async function registerRoutes(
 
   app.delete("/api/jobs/:id", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       await storage.deleteJob(job.id);
       res.status(204).send();
@@ -1163,7 +1165,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/preview", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (!job.finalVideoKey) return res.status(400).json({ error: "Final video not yet available" });
       const url = await getSignedDownloadUrl(job.finalVideoKey);
@@ -1175,7 +1177,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/download", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (!job.finalVideoKey) return res.status(400).json({ error: "Final video not yet available" });
       await pipeR2Media(res, job.finalVideoKey, undefined, { assetId: job.assetId, kind: "job-final-download" }, {
@@ -1189,7 +1191,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/preview-audio-raw", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job || !job.audioRawKey) return res.status(404).json({ error: "Raw audio not available" });
       const url = await getSignedDownloadUrl(job.audioRawKey);
       res.json({ url });
@@ -1200,7 +1202,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/preview-audio-clean", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job || !job.audioCleanKey) return res.status(404).json({ error: "Clean audio not available" });
       const url = await getSignedDownloadUrl(job.audioCleanKey);
       res.json({ url });
@@ -1211,7 +1213,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/download-audio-raw", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job || !job.audioRawKey) return res.status(404).json({ error: "Raw audio not available" });
       const url = await getSignedDownloadUrl(job.audioRawKey, `job-${job.id}-voice-raw.mp3`);
       res.redirect(url);
@@ -1222,7 +1224,7 @@ export async function registerRoutes(
 
   app.get("/api/jobs/:id/download-audio-clean", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job || !job.audioCleanKey) return res.status(404).json({ error: "Clean audio not available" });
       const url = await getSignedDownloadUrl(job.audioCleanKey, `job-${job.id}-voice-clean.mp3`);
       res.redirect(url);
@@ -1233,7 +1235,7 @@ export async function registerRoutes(
 
   app.post("/api/jobs/:id/share", requireAuth, async (req, res) => {
     try {
-      const job = await storage.getJob(parseInt(req.params.id));
+      const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
 
       if (job.shareEnabled) {
@@ -1493,7 +1495,7 @@ export async function registerRoutes(
 
   app.post("/api/assets/:id/shots", requireAuth, async (req, res) => {
     try {
-      const assetId = parseInt(req.params.id);
+      const assetId = routeParamInt(req.params.id);
       const asset = await storage.getAsset(assetId);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
@@ -1521,7 +1523,7 @@ export async function registerRoutes(
 
   app.get("/api/assets/:id/shots", requireAuth, async (req, res) => {
     try {
-      const assetId = parseInt(req.params.id);
+      const assetId = routeParamInt(req.params.id);
       const shotsList = await storage.getShots(assetId);
       res.json(shotsList);
     } catch (err: any) {
@@ -1531,7 +1533,7 @@ export async function registerRoutes(
 
   app.get("/api/shots/:id/media", requireAuth, async (req, res) => {
     try {
-      const shot = await storage.getShot(parseInt(req.params.id));
+      const shot = await storage.getShot(routeParamInt(req.params.id));
       if (!shot) return res.status(404).json({ error: "Shot not found" });
       await pipeR2Media(res, shot.r2Key, req.headers.range, { assetId: shot.assetId, kind: "shot" });
     } catch (err: any) {
@@ -1541,7 +1543,7 @@ export async function registerRoutes(
 
   app.delete("/api/shots/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteShot(parseInt(req.params.id));
+      await storage.deleteShot(routeParamInt(req.params.id));
       res.status(204).send();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1550,7 +1552,7 @@ export async function registerRoutes(
 
   app.post("/api/assets/:id/generate-variants", requireAuth, async (req, res) => {
     try {
-      const assetId = parseInt(req.params.id);
+      const assetId = routeParamInt(req.params.id);
       const asset = await storage.getAsset(assetId);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
@@ -1681,7 +1683,7 @@ export async function registerRoutes(
 
   app.get("/api/assets/:id/variants", requireAuth, async (req, res) => {
     try {
-      const assetId = parseInt(req.params.id);
+      const assetId = routeParamInt(req.params.id);
       const variantsList = await storage.getVariants(assetId);
       res.json(variantsList);
     } catch (err: any) {
@@ -1691,7 +1693,7 @@ export async function registerRoutes(
 
   app.post("/api/variants/:id/render", requireAuth, async (req, res) => {
     try {
-      const variantId = parseInt(req.params.id);
+      const variantId = routeParamInt(req.params.id);
       const variant = await storage.getVariant(variantId);
       if (!variant) return res.status(404).json({ error: "Variant not found" });
       if (variant.status === "rendering") {
@@ -1712,7 +1714,7 @@ export async function registerRoutes(
 
   app.get("/api/variants/:id/download", requireAuth, async (req, res) => {
     try {
-      const variant = await storage.getVariant(parseInt(req.params.id));
+      const variant = await storage.getVariant(routeParamInt(req.params.id));
       if (!variant) return res.status(404).json({ error: "Variant not found" });
       if (!variant.r2Key) return res.status(400).json({ error: "Video not yet rendered" });
       const url = await getSignedDownloadUrl(variant.r2Key, `variant-${variant.id}.mp4`);
@@ -1724,7 +1726,7 @@ export async function registerRoutes(
 
   app.get("/api/variants/:id/preview", requireAuth, async (req, res) => {
     try {
-      const variant = await storage.getVariant(parseInt(req.params.id));
+      const variant = await storage.getVariant(routeParamInt(req.params.id));
       if (!variant) return res.status(404).json({ error: "Variant not found" });
       if (!variant.r2Key) return res.status(400).json({ error: "Video not yet rendered" });
       const url = await getSignedDownloadUrl(variant.r2Key);
@@ -1736,7 +1738,7 @@ export async function registerRoutes(
 
   app.delete("/api/variants/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteVariant(parseInt(req.params.id));
+      await storage.deleteVariant(routeParamInt(req.params.id));
       res.status(204).send();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1745,7 +1747,7 @@ export async function registerRoutes(
 
   app.post("/api/variants/:id/send-to-pipeline", requireAuth, async (req, res) => {
     try {
-      const variantId = parseInt(req.params.id);
+      const variantId = routeParamInt(req.params.id);
       const variant = await storage.getVariant(variantId);
       if (!variant) return res.status(404).json({ error: "Variant not found" });
       if (!variant.r2Key) return res.status(400).json({ error: "Variant not yet rendered" });
@@ -1797,7 +1799,7 @@ export async function registerRoutes(
 
   app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeParamInt(req.params.id);
       const { username, status, role, password } = req.body;
       const updateData: any = {};
       if (username !== undefined) updateData.username = username;
@@ -1816,7 +1818,7 @@ export async function registerRoutes(
 
   app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeParamInt(req.params.id);
       if (id === req.user!.id) return res.status(400).json({ error: "Cannot delete your own account" });
       await storage.deleteUser(id);
       res.status(204).send();
@@ -1847,7 +1849,7 @@ export async function registerRoutes(
 
   app.patch("/api/script-prompts/:id", requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeParamInt(req.params.id);
       const { name, promptText } = req.body;
       const updates: Record<string, string> = {};
       if (name?.trim()) updates.name = name.trim();
@@ -1862,7 +1864,7 @@ export async function registerRoutes(
 
   app.delete("/api/script-prompts/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteScriptPrompt(parseInt(req.params.id), req.user!.role === "admin" ? undefined : req.user!.id);
+      await storage.deleteScriptPrompt(routeParamInt(req.params.id), req.user!.role === "admin" ? undefined : req.user!.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

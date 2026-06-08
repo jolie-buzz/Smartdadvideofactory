@@ -160,6 +160,21 @@ type BuzzlyStudioProps = {
 
 const MOBILE_TIMELINE_HEIGHT_KEY = "buzzly.mobileTimelineHeightDvh";
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const roundTime = (value: number) => Number(value.toFixed(2));
+const getTimelinePlaybackRate = (item: Pick<BuzzlyTimelineItem, "playbackRate">) => clampNumber(item.playbackRate || 1, 0.25, 4);
+const getMediaSpan = (item: Pick<BuzzlyTimelineItem, "duration" | "trimStart" | "trimEnd" | "playbackRate">) => {
+  const trimStart = Math.max(0, item.trimStart || 0);
+  const trimEnd = Math.max(trimStart, item.trimEnd || trimStart + item.duration * getTimelinePlaybackRate(item));
+  return {
+    trimStart,
+    trimEnd,
+    mediaDuration: trimEnd - trimStart,
+    playbackRate: getTimelinePlaybackRate(item),
+  };
+};
+const getTimelineDurationForMediaSpan = (mediaDuration: number, playbackRate: number) => (
+  roundTime(Math.max(0.1, mediaDuration / playbackRate))
+);
 
 const getInitialMobileTimelineHeight = () => {
   if (typeof window === "undefined") return 34;
@@ -167,10 +182,12 @@ const getInitialMobileTimelineHeight = () => {
   return Number.isFinite(stored) ? clampNumber(stored, 24, 52) : 34;
 };
 
-const defaultVisualFrame = (type: BuzzlyTimelineItem["type"]) => {
+type VisualFrameDefaults = Pick<BuzzlyTimelineItem, "scale"> & Partial<Pick<BuzzlyTimelineItem, "frameSize" | "mediaFit">>;
+
+const defaultVisualFrame = (type: BuzzlyTimelineItem["type"]): VisualFrameDefaults => {
   if (type === "video") return { frameSize: { width: 1, height: 1 }, mediaFit: "cover" as const, scale: 1 };
   if (type === "image") return { frameSize: { width: 0.86, height: 0.86 }, mediaFit: "contain" as const, scale: 1 };
-  return {};
+  return { scale: 1 };
 };
 
 function effectPatchForPreset(preset: NonNullable<BuzzlyTimelineItem["effectPreset"]>): Partial<BuzzlyTimelineItem> {
@@ -845,7 +862,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     }
 
     if (tool === "split") {
-      const splitOffset = Number((currentTime - selectedItem.startTime).toFixed(2));
+      const splitOffset = roundTime(currentTime - selectedItem.startTime);
       if (splitOffset <= 0.15 || splitOffset >= selectedItem.duration - 0.5) {
         toast({
           title: "Move playhead inside the clip",
@@ -853,23 +870,26 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         });
         return;
       }
-      const firstDuration = Math.max(0.15, splitOffset);
-      const secondDuration = Math.max(0.5, selectedItem.duration - firstDuration);
+      const { trimStart, trimEnd, playbackRate } = getMediaSpan(selectedItem);
+      const splitMediaTime = clampNumber(roundTime(trimStart + splitOffset * playbackRate), trimStart + 0.05, trimEnd - 0.05);
+      const firstDuration = getTimelineDurationForMediaSpan(splitMediaTime - trimStart, playbackRate);
+      const secondDuration = getTimelineDurationForMediaSpan(trimEnd - splitMediaTime, playbackRate);
       const baseName = selectedItem.name.replace(/\s+(part\s+\d+|cut)+$/i, "").trim() || selectedItem.name;
       const leftClip: BuzzlyTimelineItem = {
         ...selectedItem,
         name: `${baseName} part 1`,
         duration: firstDuration,
-        trimEnd: Number((selectedItem.trimStart + firstDuration).toFixed(2)),
+        trimStart,
+        trimEnd: splitMediaTime,
       };
       const clone: BuzzlyTimelineItem = {
         ...selectedItem,
         id: `${selectedItem.id}-split-${Date.now()}`,
         name: `${baseName} part 2`,
-        startTime: Number((selectedItem.startTime + firstDuration).toFixed(2)),
+        startTime: roundTime(selectedItem.startTime + firstDuration),
         duration: secondDuration,
-        trimStart: Number((selectedItem.trimStart + firstDuration).toFixed(2)),
-        trimEnd: selectedItem.trimEnd,
+        trimStart: splitMediaTime,
+        trimEnd,
       };
 
       recordHistory();
@@ -948,7 +968,11 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
     if (tool === "speed") {
       const currentRate = selectedItem.playbackRate || 1;
       const nextRate = currentRate === 1 ? 1.25 : currentRate === 1.25 ? 1.5 : 1;
-      updateItem(selectedItem.id, { playbackRate: nextRate });
+      const { mediaDuration } = getMediaSpan(selectedItem);
+      updateItem(selectedItem.id, {
+        playbackRate: nextRate,
+        duration: getTimelineDurationForMediaSpan(mediaDuration, nextRate),
+      });
       return;
     }
 
@@ -2156,14 +2180,13 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
       };
     });
 
-    const imageItems: BuzzlyTimelineItem[] = [
-      ...(draft.productPhoto ? [{
+    const productPhotoItem: BuzzlyTimelineItem | null = draft.productPhoto ? {
         id: "guided-product-photo",
-        type: "image" as const,
+        type: "image",
         name: "AI-analyzed product photo",
         trackId: "image-overlays",
         source: {
-          kind: "local" as const,
+          kind: "local",
           uri: photoUrl,
           filename: draft.productPhoto.name,
           mimeType: draft.productPhoto.type || "image/png",
@@ -2178,7 +2201,10 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
         mediaFit: "contain",
         scale: 0.72,
         opacity: 0.96,
-      }] : []),
+      } : null;
+
+    const imageItems: BuzzlyTimelineItem[] = [
+      ...(productPhotoItem ? [productPhotoItem] : []),
       {
         id: "guided-ai-broll",
         type: "image",
@@ -2808,7 +2834,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
                 onClick={() => {
                   if (opensSheet) {
                     setActiveRail(item.id);
-                    setMobileTool((current) => current === item.id ? null : item.id);
+                    setMobileTool((current) => current === item.id ? null : item.id as MobileToolId);
                     return;
                   }
                   if (item.id === "studio") {

@@ -10,6 +10,8 @@ import type { Asset, VideoAnalysis } from "@shared/schema";
 
 export const VIDEO_ANALYSIS_VERSION = "video-intelligence-v2";
 export const VIDEO_ANALYSIS_MODEL = process.env.VIDEO_ANALYSIS_MODEL || "gpt-4o";
+const KEYFRAME_INTERVAL_SEC = 2;
+const ANALYSIS_CHUNK_FRAME_COUNT = Math.max(4, Number(process.env.VIDEO_ANALYSIS_CHUNK_FRAMES || 12));
 
 type AnalysisTarget = {
   r2Key: string;
@@ -17,6 +19,11 @@ type AnalysisTarget = {
 };
 
 type KeyframeSample = {
+  timeSec: number;
+  path: string;
+};
+
+type VisionFrame = {
   timeSec: number;
   dataUrl: string;
 };
@@ -84,34 +91,42 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   }
 }
 
-async function extractKeyframes(inputPath: string): Promise<KeyframeSample[]> {
-  const workDir = await mkdtemp(join(tmpdir(), "video-analysis-"));
-  try {
-    await runFfmpeg([
-      "-y",
-      "-i", inputPath,
-      "-vf", "fps=1/2,scale=640:-1",
-      "-q:v", "3",
-      join(workDir, "frame_%02d.jpg"),
-    ], 600_000);
+async function extractKeyframes(inputPath: string, workDir: string): Promise<KeyframeSample[]> {
+  await runFfmpeg([
+    "-y",
+    "-threads", "1",
+    "-i", inputPath,
+    "-vf", `fps=1/${KEYFRAME_INTERVAL_SEC},scale=640:-1`,
+    "-q:v", "3",
+    join(workDir, "frame_%05d.jpg"),
+  ], 600_000);
 
-    const files = (await readdir(workDir))
-      .filter((file) => /^frame_\d+\.jpg$/.test(file))
-      .sort();
+  const files = (await readdir(workDir))
+    .filter((file) => /^frame_\d+\.jpg$/.test(file))
+    .sort();
 
-    const samples: KeyframeSample[] = [];
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      const frame = await readFile(join(workDir, file));
-      samples.push({
-        timeSec: index * 2,
-        dataUrl: `data:image/jpeg;base64,${frame.toString("base64")}`,
-      });
-    }
-    return samples;
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  return files.map((file, index) => ({
+    timeSec: index * KEYFRAME_INTERVAL_SEC,
+    path: join(workDir, file),
+  }));
+}
+
+function chunkKeyframes(samples: KeyframeSample[]): KeyframeSample[][] {
+  const chunks: KeyframeSample[][] = [];
+  for (let index = 0; index < samples.length; index += ANALYSIS_CHUNK_FRAME_COUNT) {
+    chunks.push(samples.slice(index, index + ANALYSIS_CHUNK_FRAME_COUNT));
   }
+  return chunks;
+}
+
+async function loadVisionFrames(keyframes: KeyframeSample[]): Promise<VisionFrame[]> {
+  return Promise.all(keyframes.map(async (frame) => {
+    const image = await readFile(frame.path);
+    return {
+      timeSec: frame.timeSec,
+      dataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
+    };
+  }));
 }
 
 function buildTimelineContext(timelineJson?: Record<string, any> | null): TimelineContextScene[] {
@@ -135,7 +150,7 @@ function buildTimelineContext(timelineJson?: Record<string, any> | null): Timeli
     });
 }
 
-async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, timelineScenes: TimelineContextScene[]): Promise<Record<string, unknown>> {
+async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, timelineScenes: TimelineContextScene[], chunkLabel?: string): Promise<Record<string, unknown>> {
   const client = createVisionClient();
   if (!client) {
     throw new Error("Missing OpenAI credentials for video analysis. Set OPENAI_API_KEY or AI_INTEGRATIONS_OPENAI_API_KEY.");
@@ -143,6 +158,7 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
   if (keyframes.length === 0) {
     throw new Error("No keyframes were extracted from this video");
   }
+  const visionFrames = await loadVisionFrames(keyframes);
 
   const response = await client.chat.completions.create({
     model,
@@ -169,7 +185,8 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
             type: "text",
             text: [
               "Analyze these sampled video keyframes for reusable script, captions, hook, sound, transition, auto-cut, and timeline-label decisions.",
-              `Keyframe timestamps: ${keyframes.map((frame) => `${frame.timeSec}s`).join(", ")}`,
+              chunkLabel ? `Chunk context: ${chunkLabel}` : "Chunk context: full sampled sequence.",
+              `Keyframe timestamps: ${visionFrames.map((frame) => `${frame.timeSec}s`).join(", ")}`,
               timelineScenes.length
                 ? `Studio timeline clip map: ${JSON.stringify(timelineScenes)}`
                 : "No Studio timeline clip map is available; infer timing from keyframe timestamps.",
@@ -177,7 +194,7 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
               "If the product or action is unclear, still return best-effort visual context and note uncertainty inside the relevant fields.",
             ].join("\n"),
           },
-          ...keyframes.map((frame) => ({
+          ...visionFrames.map((frame) => ({
             type: "image_url",
             image_url: { url: frame.dataUrl, detail: "low" },
           })),
@@ -187,6 +204,84 @@ async function analyzeKeyframes(keyframes: KeyframeSample[], model: string, time
   });
 
   return parseJsonObject(response.choices[0]?.message?.content?.trim() || "{}");
+}
+
+async function mergeChunkAnalyses(
+  chunkAnalyses: Record<string, unknown>[],
+  model: string,
+  timelineScenes: TimelineContextScene[],
+  frameCount: number,
+): Promise<Record<string, unknown>> {
+  if (chunkAnalyses.length === 1) {
+    return {
+      ...chunkAnalyses[0],
+      source_frame_count: frameCount,
+      analysis_chunk_count: 1,
+      sampling_interval_sec: KEYFRAME_INTERVAL_SEC,
+    };
+  }
+
+  const client = createVisionClient();
+  if (!client) {
+    throw new Error("Missing OpenAI credentials for video analysis. Set OPENAI_API_KEY or AI_INTEGRATIONS_OPENAI_API_KEY.");
+  }
+
+  const compactChunks = chunkAnalyses.map((analysis, index) => ({
+    chunk: index + 1,
+    analysis,
+  }));
+
+  const response = await client.chat.completions.create({
+    model,
+    response_format: { type: "json_object" },
+    max_completion_tokens: 3200,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are Buzzly/Brandy's reusable Video Intelligence Layer.",
+          "Merge chunk-level visual analyses into one full-video JSON analysis.",
+          "Preserve time-aware details across the whole video and remove duplicates.",
+          "Do not invent audio, dialogue, or unseen claims. Do not include markdown.",
+          "Required JSON keys: overall_summary, product_or_main_subject, timeline_seconds, scenes, visible_actions, detected_text_ocr, emotional_tone, pacing, important_moments, suggested_hooks, weak_or_dead_spots, shot_categories, suggested_sound_effects, suggested_transitions, suggested_captions_overlay_text, suggested_cut_points, possible_product_benefits_shown_visually, script_timing_guidance, voiceover_beats, source_frame_count, analysis_chunk_count, sampling_interval_sec.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Frame count: ${frameCount}`,
+          `Sampling interval seconds: ${KEYFRAME_INTERVAL_SEC}`,
+          timelineScenes.length
+            ? `Studio timeline clip map: ${JSON.stringify(timelineScenes)}`
+            : "No Studio timeline clip map is available.",
+          `Chunk analyses: ${JSON.stringify(compactChunks).slice(0, 50000)}`,
+        ].join("\n"),
+      },
+    ],
+  });
+
+  const merged = parseJsonObject(response.choices[0]?.message?.content?.trim() || "{}");
+  return {
+    ...merged,
+    source_frame_count: frameCount,
+    analysis_chunk_count: chunkAnalyses.length,
+    sampling_interval_sec: KEYFRAME_INTERVAL_SEC,
+  };
+}
+
+async function analyzeKeyframeSequence(keyframes: KeyframeSample[], model: string, timelineScenes: TimelineContextScene[]): Promise<Record<string, unknown>> {
+  const chunks = chunkKeyframes(keyframes);
+  const analyses: Record<string, unknown>[] = [];
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    const firstFrame = chunk[0];
+    const lastFrame = chunk[chunk.length - 1];
+    const chunkLabel = `chunk ${index + 1} of ${chunks.length}, frames ${firstFrame?.timeSec ?? 0}s-${lastFrame?.timeSec ?? 0}s`;
+    analyses.push(await analyzeKeyframes(chunk, model, timelineScenes, chunkLabel));
+  }
+
+  return mergeChunkAnalyses(analyses, model, timelineScenes, keyframes.length);
 }
 
 export async function getAssetAnalysisTarget(asset: Asset): Promise<AnalysisTarget | null> {
@@ -235,8 +330,14 @@ export async function ensureVideoAnalysisForAsset(
       }
     }
 
-    const keyframes = await extractKeyframes(inputPath);
-    const analysisJson = await analyzeKeyframes(keyframes, model, buildTimelineContext(options.timelineJson || asset.timelineJson as Record<string, any> | null));
+    const keyframeDir = await mkdtemp(join(tmpdir(), "video-analysis-frames-"));
+    let analysisJson: Record<string, unknown>;
+    try {
+      const keyframes = await extractKeyframes(inputPath, keyframeDir);
+      analysisJson = await analyzeKeyframeSequence(keyframes, model, buildTimelineContext(options.timelineJson || asset.timelineJson as Record<string, any> | null));
+    } finally {
+      await rm(keyframeDir, { recursive: true, force: true }).catch(() => {});
+    }
     const analysis = await storage.createVideoAnalysis({
       videoAssetId: asset.id,
       videoHash,

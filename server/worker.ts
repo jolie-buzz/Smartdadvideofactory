@@ -345,6 +345,7 @@ async function burnCaptionsToFile(
   await runFfmpeg([
     "-i", inputVideoPath,
     "-vf", `subtitles='${escapedSrtPath}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=30,FontName=FreeSans'`,
+    "-threads", "1",
     "-c:a", "copy",
     "-y",
     outputVideoPath,

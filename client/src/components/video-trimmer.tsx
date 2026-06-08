@@ -211,6 +211,7 @@ export default function VideoTrimmer({
   const playSelection = useCallback(() => {
     const vid = videoRef.current;
     if (!vid) return;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     vid.currentTime = startTime;
     vid.play();
 

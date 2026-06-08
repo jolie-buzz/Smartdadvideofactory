@@ -26,6 +26,13 @@ const isActiveAtTime = (item: BuzzlyTimelineItem, currentTime: number) =>
   currentTime >= item.startTime && currentTime < item.startTime + item.duration;
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const getPlaybackRate = (item: BuzzlyTimelineItem) => clampNumber(item.playbackRate || 1, 0.25, 4);
+const getMediaTimeAtTimelineTime = (item: BuzzlyTimelineItem, currentTime: number) => {
+  const trimStart = Math.max(0, item.trimStart || 0);
+  const trimEnd = Math.max(trimStart, item.trimEnd || trimStart + item.duration * getPlaybackRate(item));
+  const localTimelineTime = clampNumber(currentTime - item.startTime, 0, item.duration);
+  return clampNumber(trimStart + localTimelineTime * getPlaybackRate(item), trimStart, trimEnd);
+};
 const SNAP_THRESHOLD = 0.025;
 
 type SnapGuides = {
@@ -271,14 +278,14 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
       const video = videoRefs.current[item.id];
       if (!video) return;
 
-      const itemTime = clampNumber(currentTime - item.startTime + item.trimStart, 0, Math.max(0, item.trimEnd - item.trimStart));
+      const itemTime = getMediaTimeAtTimelineTime(item, currentTime);
       const allowedDrift = isPlaying && !isTimelineScrub ? 1.25 : 0.18;
       if (Number.isFinite(itemTime) && Math.abs(video.currentTime - itemTime) > allowedDrift) {
         video.currentTime = itemTime;
       }
       video.volume = clampNumber(item.volume, 0, 1);
       video.muted = item.volume <= 0.01;
-      video.playbackRate = item.playbackRate || 1;
+      video.playbackRate = getPlaybackRate(item);
       if (isPlaying && video.paused) {
         void video.play().catch(() => undefined);
       } else if (!isPlaying && !video.paused) {
@@ -290,12 +297,13 @@ export function PreviewPanel({ timeline, currentTime, isPlaying, selectedItemId,
       const audio = audioRefs.current[item.id];
       if (!audio) return;
 
-      const itemTime = clampNumber(currentTime - item.startTime + item.trimStart, 0, Math.max(0, item.trimEnd - item.trimStart));
+      const itemTime = getMediaTimeAtTimelineTime(item, currentTime);
       const allowedDrift = isPlaying && !isTimelineScrub ? 1.25 : 0.18;
       if (Number.isFinite(itemTime) && Math.abs(audio.currentTime - itemTime) > allowedDrift) {
         audio.currentTime = itemTime;
       }
       audio.volume = clampNumber(item.volume, 0, 1);
+      audio.playbackRate = getPlaybackRate(item);
       if (isPlaying && audio.paused) {
         void audio.play().catch(() => undefined);
       } else if (!isPlaying && !audio.paused) {

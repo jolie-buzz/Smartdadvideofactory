@@ -90,6 +90,8 @@ const colorByType: Record<BuzzlyClipType, string> = {
 
 const formatSeconds = (seconds: number) => `${Math.round(seconds)}s`;
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const roundTime = (value: number) => Number(value.toFixed(2));
+const getPlaybackRate = (item: Pick<BuzzlyTimelineItem, "playbackRate">) => clampNumber(item.playbackRate || 1, 0.25, 4);
 const SNAP_THRESHOLD_SECONDS = 0.35;
 const MAX_VIDEO_THUMBNAILS = 60;
 const LEFT_COLUMN_WIDTH = 148;
@@ -455,7 +457,10 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                 className="h-7 gap-1 px-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
                 onClick={() => {
                   const duration = clampNumber(selectedItem.duration - 0.5, 0.5, timeline.project.duration - selectedItem.startTime);
-                  onUpdateItem(selectedItem.id, { duration, trimEnd: selectedItem.trimStart + duration });
+                  onUpdateItem(selectedItem.id, {
+                    duration,
+                    trimEnd: roundTime(selectedItem.trimStart + duration * getPlaybackRate(selectedItem)),
+                  });
                 }}
               >
                 <Shrink className="h-3.5 w-3.5" />
@@ -478,7 +483,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                 className="h-7 gap-1 px-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
                 onClick={() => {
                   const trimStart = clampNumber(selectedItem.trimStart + 0.25, 0, Math.max(0, selectedItem.trimEnd - 0.5));
-                  const duration = Math.max(0.5, selectedItem.trimEnd - trimStart);
+                  const duration = Math.max(0.5, (selectedItem.trimEnd - trimStart) / getPlaybackRate(selectedItem));
                   onUpdateItem(selectedItem.id, { trimStart, duration });
                 }}
               >
@@ -490,7 +495,7 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                 className="h-7 gap-1 px-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
                 onClick={() => {
                   const trimEnd = clampNumber(selectedItem.trimEnd - 0.25, selectedItem.trimStart + 0.5, selectedItem.trimEnd);
-                  const duration = Math.max(0.5, trimEnd - selectedItem.trimStart);
+                  const duration = Math.max(0.5, (trimEnd - selectedItem.trimStart) / getPlaybackRate(selectedItem));
                   onUpdateItem(selectedItem.id, { trimEnd, duration });
                 }}
               >
@@ -765,18 +770,19 @@ export function TimelinePanel({ timeline, currentTime, selectedItemId, selectedI
                         const maxStart = item.startTime + item.duration - 0.5;
                         const nextStart = snapTrimStart(clampNumber(pointerTime, 0, maxStart));
                         const delta = nextStart - item.startTime;
+                        const playbackRate = getPlaybackRate(item);
                         onTrimItem(item.id, {
-                          startTime: Number(nextStart.toFixed(2)),
-                          duration: Number((item.duration - delta).toFixed(2)),
-                          trimStart: Number(Math.max(0, item.trimStart + delta).toFixed(2)),
+                          startTime: roundTime(nextStart),
+                          duration: roundTime(item.duration - delta),
+                          trimStart: roundTime(Math.max(0, item.trimStart + delta * playbackRate)),
                         });
                         onSeek(nextStart);
                       } else {
                         const nextEnd = snapTrimEnd(clampNumber(pointerTime, item.startTime + 0.5, timeline.project.duration));
-                        const duration = Number((nextEnd - item.startTime).toFixed(2));
+                        const duration = roundTime(nextEnd - item.startTime);
                         onTrimItem(item.id, {
                           duration,
-                          trimEnd: Number((item.trimStart + duration).toFixed(2)),
+                          trimEnd: roundTime(item.trimStart + duration * getPlaybackRate(item)),
                         });
                         onSeek(nextEnd);
                       }

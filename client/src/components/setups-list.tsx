@@ -238,7 +238,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
 
   if (assetsQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-3">
+      <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-hidden">
         {[1, 2, 3].map((i) => (
           <Card key={i}>
             <CardContent className="p-6">
@@ -271,15 +271,15 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3">
-      <div className="flex items-center justify-between gap-2">
+    <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-hidden">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">Saved Setups</h2>
         <Badge variant="secondary">{visibleAssets.length} setup{visibleAssets.length !== 1 ? "s" : ""}</Badge>
       </div>
 
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
-          <label className="flex items-center gap-2 text-sm">
+      <Card className="overflow-hidden">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3 max-sm:items-stretch">
+          <label className="flex items-center gap-2 text-sm max-sm:w-full">
             <Checkbox
               checked={allSelected}
               onCheckedChange={(value) => setSelectedAssetIds(value ? sortedAssets.map((asset) => asset.id) : [])}
@@ -287,8 +287,8 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
             />
             Select all
           </label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{selectedCount} selected</Badge>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 max-sm:grid max-sm:w-full max-sm:grid-cols-2">
+            <Badge variant="outline" className="max-sm:col-span-2 max-sm:w-fit">{selectedCount} selected</Badge>
             <Button
               type="button"
               size="sm"
@@ -296,6 +296,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
               disabled={selectedCount === 0 || bulkActivateMutation.isPending}
               onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: false })}
               data-testid="button-bulk-activate"
+              className="max-sm:w-full max-sm:min-w-0"
             >
               {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
               Activate Selected
@@ -306,6 +307,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
               disabled={selectedCount === 0 || bulkActivateMutation.isPending}
               onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: true })}
               data-testid="button-bulk-activate-shuffle"
+              className="max-sm:w-full max-sm:min-w-0"
             >
               {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
               Shuffle Selected
@@ -319,9 +321,9 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         const isRecovered = asset.name.startsWith("Recovered Asset ");
         const selectedMusicLabel = musicOptions.find((option) => option.key === asset.musicKey)?.label;
         return (
-        <Card key={asset.id}>
+        <Card key={asset.id} className="overflow-hidden">
           <CardContent className="p-3">
-            <div className="flex items-start gap-3 max-sm:flex-col">
+            <div className="flex min-w-0 items-start gap-3 max-sm:flex-col">
               <Checkbox
                 checked={selectedAssetIds.includes(asset.id)}
                 onCheckedChange={(value) => toggleSelected(asset.id, Boolean(value))}
@@ -343,10 +345,10 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </span>
                 )}
               </button>
-              <div className="min-w-0 flex-1 space-y-2">
+              <div className="w-full min-w-0 flex-1 space-y-2">
                 <div className="flex items-start justify-between gap-3 max-lg:flex-col">
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <h3 className="min-w-0 truncate font-medium leading-5" data-testid={`text-asset-name-${asset.id}`}>
                         {asset.name}
                       </h3>
@@ -366,26 +368,26 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                         <Badge variant="outline" className="shrink-0 text-xs">Recovered</Badge>
                       )}
                       {asset.voiceName && (
-                        <Badge variant="secondary" className="min-w-0 max-w-[260px] truncate text-xs">
+                        <Badge variant="secondary" className="min-w-0 max-w-[260px] truncate text-xs max-sm:max-w-full">
                           <Mic className="mr-1 h-3 w-3 shrink-0" />
                           {asset.voiceName}
                         </Badge>
                       )}
                     </div>
 
-                    <p className="truncate text-sm text-muted-foreground">
+                    <p className="min-w-0 break-words text-sm text-muted-foreground sm:truncate max-sm:[display:-webkit-box] max-sm:[-webkit-box-orient:vertical] max-sm:[-webkit-line-clamp:2] max-sm:overflow-hidden">
                       {asset.personaPrompt}
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start">
+                  <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start max-sm:grid max-sm:grid-cols-2">
                     {onOpenStudio && (
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={() => onOpenStudio(asset, media)}
                         data-testid={`button-open-studio-${asset.id}`}
-                        className="h-8 max-sm:flex-1"
+                        className="h-8 max-sm:w-full max-sm:min-w-0"
                       >
                         <Clapperboard className="mr-1 h-4 w-4" />
                         Studio
@@ -397,7 +399,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: false })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-${asset.id}`}
-                      className="h-8 max-sm:flex-1"
+                      className="h-8 max-sm:w-full max-sm:min-w-0"
                     >
                       {activateMutation.isPending ? (
                         <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -411,14 +413,14 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: true })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-shuffle-${asset.id}`}
-                      className="h-8 max-sm:flex-1"
+                      className="h-8 max-sm:w-full max-sm:min-w-0"
                     >
                       {activateMutation.isPending ? (
                         <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                       ) : (
                         <Zap className="mr-1 h-4 w-4" />
                       )}
-                      Activate with Shuffle
+                      Activate<span className="max-sm:hidden"> with Shuffle</span>
                     </Button>
                     <Button
                       size="sm"
@@ -432,7 +434,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       }}
                       data-testid={`button-edit-${asset.id}`}
                       title="Edit setup"
-                      className="h-8 max-sm:flex-1"
+                      className="h-8 max-sm:w-full max-sm:min-w-0"
                     >
                       <Pencil className="h-4 w-4" />
                       <span className="ml-1">Edit</span>
@@ -444,7 +446,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={duplicateMutation.isPending}
                       data-testid={`button-duplicate-${asset.id}`}
                       title="Duplicate setup"
-                      className="h-8 w-8"
+                      className="h-8 w-8 max-sm:w-full"
                     >
                       {duplicateMutation.isPending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -459,15 +461,15 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={deleteMutation.isPending}
                       data-testid={`button-delete-${asset.id}`}
                       title="Delete setup"
-                      className="h-8 w-8"
+                      className="h-8 w-8 max-sm:w-full"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
 
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="space-y-1">
+                <div className="grid min-w-0 gap-2 md:grid-cols-2">
+                  <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Voice</p>
                     <Select
                       value={asset.voiceId || "none"}
@@ -483,7 +485,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       }}
                       disabled={voicesQuery.isLoading || quickUpdateMutation.isPending}
                     >
-                      <SelectTrigger className="h-8 text-xs" data-testid={`select-card-voice-${asset.id}`}>
+                      <SelectTrigger className="h-8 min-w-0 text-xs" data-testid={`select-card-voice-${asset.id}`}>
                         <SelectValue placeholder={asset.voiceName || "Choose voice"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -496,7 +498,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
+                  <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Music</p>
                     <Select
                       value={asset.musicKey || "none"}
@@ -508,7 +510,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       }}
                       disabled={quickUpdateMutation.isPending || musicLibraryQuery.isLoading}
                     >
-                      <SelectTrigger className="h-8 text-xs" data-testid={`select-card-music-${asset.id}`}>
+                      <SelectTrigger className="h-8 min-w-0 text-xs" data-testid={`select-card-music-${asset.id}`}>
                         <SelectValue placeholder={selectedMusicLabel || "Choose music"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -523,7 +525,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Image className="w-3 h-3" /> {asset.photoKey ? "Photo" : "No photo"}
                   </span>

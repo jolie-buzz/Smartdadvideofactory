@@ -62,6 +62,8 @@ const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CACHEABLE_API_PREFIXES = [
   "/api/assets",
   "/api/jobs",
+  "/api/music-library",
+  "/api/admin/general-prompts",
   "/api/settings",
   "/api/script-prompts",
   "/api/elevenlabs/voices",

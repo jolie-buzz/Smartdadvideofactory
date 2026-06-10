@@ -1,7 +1,7 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { uploadToR2, uploadFileToR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, downloadFromR2, getR2ObjectStream, getR2ConfigStatus } from "./r2";
+import { uploadToR2, uploadFileToR2, downloadFileFromR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, getR2ObjectStream, getR2ConfigStatus } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
 import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt, VIDEO_ANALYSIS_MODEL, VIDEO_ANALYSIS_VERSION } from "./video-intelligence";
@@ -17,6 +17,9 @@ import OpenAI from "openai";
 import { spawn } from "child_process";
 import ffmpegStatic from "ffmpeg-static";
 import { sanitizeNarrationScript } from "@shared/script-cleaner";
+import { logMemory, withHeavyWork } from "./heavy-work";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -57,6 +60,8 @@ const compactMediaError = (err: any) => ({
 const publicMediaUrlFromKey = (key?: string | null) => (
   key?.startsWith("public:") ? key.slice("public:".length) : null
 );
+const ADMIN_MUSIC_LIBRARY_PROMPT = "__ADMIN_MUSIC_LIBRARY__";
+const ADMIN_GENERAL_PROMPTS_NAME = "__ADMIN_GENERAL_PROMPTS__";
 const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] || "" : value || "";
 const routeParamInt = (value: string | string[] | undefined) => parseInt(routeParam(value), 10);
 
@@ -132,15 +137,10 @@ const queueStudioRenderForAsset = (asset: { id: number; name?: string | null }, 
   storage.getAsset(asset.id)
     .then((freshAsset) => freshAsset ? renderStudioTimelineForAsset(freshAsset, reason) : null)
     .then((updatedAsset) => {
-      if (updatedAsset) return ensureVideoAnalysisForAsset(updatedAsset, { timelineJson: updatedAsset.timelineJson as any });
-      return null;
-    })
-    .then((result) => {
-      if (!result) return;
-      console.info("[studio-render] analysis ready", {
+      if (!updatedAsset) return;
+      console.info("[studio-render] background render ready", {
         assetId: asset.id,
         reason,
-        reused: result.reused,
       });
     })
     .catch((err) => {
@@ -160,6 +160,22 @@ const queueVideoAnalysisForAsset = (asset: { id: number; name?: string | null },
   if (queuedVideoAnalysisAssetIds.has(asset.id)) return;
   queuedVideoAnalysisAssetIds.add(asset.id);
   storage.getAsset(asset.id)
+    .then((freshAsset) => {
+      if (!freshAsset) return null;
+      return storage.getLatestVideoAnalysisForAsset(freshAsset.id)
+        .then((latest) => {
+          if (latest) {
+            console.info("[video-analysis] existing analysis found; skipping background analysis", {
+              assetId: asset.id,
+              assetName: asset.name || null,
+              reason,
+              analysisId: latest.id,
+            });
+            return null;
+          }
+          return freshAsset;
+        });
+    })
     .then((freshAsset) => {
       if (!freshAsset) return null;
       return ensureVideoAnalysisForAsset(freshAsset);
@@ -313,7 +329,7 @@ function findGeminiVideoUri(value: unknown): string | null {
   return null;
 }
 
-async function generateGeminiTransitionVideo(prompt: string, seconds: number): Promise<Buffer> {
+async function generateGeminiTransitionVideoFile(prompt: string, seconds: number, outputPath: string): Promise<void> {
   const apiKey = getGeminiVideoApiKey();
   if (!apiKey) {
     throw new Error("Missing GEMINI_API_KEY. Add it to your environment to enable AI video transitions.");
@@ -385,7 +401,11 @@ async function generateGeminiTransitionVideo(prompt: string, seconds: number): P
     throw new Error(`Gemini video download failed (${videoRes.status}): ${errorText.slice(0, 500)}`);
   }
 
-  return Buffer.from(await videoRes.arrayBuffer());
+  if (!videoRes.body) {
+    throw new Error("Gemini video download returned an empty response body.");
+  }
+
+  await pipeline(Readable.fromWeb(videoRes.body as any), fs.createWriteStream(outputPath));
 }
 
 export async function registerRoutes(
@@ -528,6 +548,77 @@ export async function registerRoutes(
       res.json(Object.fromEntries(entries));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/music-library", requireAuth, async (_req, res) => {
+    try {
+      const assetsList = await storage.getAssets();
+      const tracks = await Promise.all(assetsList
+        .filter((asset) => asset.personaPrompt === ADMIN_MUSIC_LIBRARY_PROMPT && asset.musicKey)
+        .map(async (asset) => ({
+          id: asset.id,
+          name: asset.name,
+          musicKey: asset.musicKey,
+          musicUrl: asset.musicKey
+            ? publicMediaUrlFromKey(asset.musicKey) || await getSignedDownloadUrl(asset.musicKey).catch(() => null)
+            : null,
+          createdAt: asset.createdAt,
+        })));
+      res.json(tracks);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load music library" });
+    }
+  });
+
+  app.post("/api/admin/music-library", requireAdmin, async (req, res) => {
+    try {
+      const tracks = z.array(z.object({
+        name: z.string().min(1).max(160),
+        musicKey: z.string().min(1),
+      })).min(1).parse(req.body.tracks);
+
+      const created = [];
+      for (const track of tracks) {
+        created.push(await storage.createAsset({
+          name: track.name,
+          photoKey: "",
+          videoKey: "",
+          videoSource: "builder",
+          isFavorite: false,
+          personaPrompt: ADMIN_MUSIC_LIBRARY_PROMPT,
+          voiceId: null,
+          voiceName: null,
+          openaiModel: "gpt-4.1",
+          elevenlabsModel: "eleven_turbo_v2_5",
+          useEnhance: true,
+          thresholdDb: -35,
+          removeSilencesLongerThan: 0.2,
+          ignoreDetectionsShorterThan: 0.75,
+          musicKey: track.musicKey,
+          voiceVolume: 1,
+          musicVolume: 0.3,
+          autoCaptions: false,
+          hookHeadline: false,
+          hookPrompt: null,
+          hookModel: "gpt-4.1",
+          captionEnabled: false,
+          captionPrompt: null,
+          captionModel: "gpt-4.1",
+          seoEnabled: false,
+          seoPrompt: null,
+          seoModel: "gpt-4.1",
+          timelineJson: null,
+          userId: req.user!.id,
+        }));
+      }
+
+      res.status(201).json(created);
+    } catch (err: any) {
+      if (err?.issues) {
+        return res.status(400).json({ error: err.issues[0]?.message || "Invalid music library request" });
+      }
+      res.status(500).json({ error: err.message || "Failed to save music tracks" });
     }
   });
 
@@ -737,6 +828,7 @@ export async function registerRoutes(
           id: latest.id,
           videoHash: latest.videoHash,
           analysisJson: latest.analysisJson,
+          sourceR2Key: latest.sourceR2Key,
           modelUsed: latest.modelUsed,
           analysisVersion: latest.analysisVersion,
           createdAt: latest.createdAt,
@@ -757,6 +849,27 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Forbidden" });
       }
 
+      const forceAnalysis = Boolean(req.body?.force);
+      const requestedModel = normalizeVideoAnalysisModel(req.body?.model);
+      const latest = await storage.getLatestVideoAnalysisForAsset(asset.id);
+      if (!forceAnalysis && latest?.modelUsed === requestedModel && latest.analysisVersion === VIDEO_ANALYSIS_VERSION) {
+        return res.json({
+          status: "ready",
+          reused: true,
+          source: "saved-analysis",
+          analysis: {
+            id: latest.id,
+            videoHash: latest.videoHash,
+            analysisJson: latest.analysisJson,
+            sourceR2Key: latest.sourceR2Key,
+            modelUsed: latest.modelUsed,
+            analysisVersion: latest.analysisVersion,
+            createdAt: latest.createdAt,
+            updatedAt: latest.updatedAt,
+          },
+        });
+      }
+
       const renderedAsset = asset.timelineJson && typeof asset.timelineJson === "object"
         ? await renderStudioTimelineForAsset(asset, "manual-video-analysis").catch((err) => {
             console.warn("[studio-render] manual analysis render fallback", {
@@ -767,8 +880,8 @@ export async function registerRoutes(
           })
         : asset;
       const result = await ensureVideoAnalysisForAsset(renderedAsset || asset, {
-        force: Boolean(req.body?.force),
-        model: normalizeVideoAnalysisModel(req.body?.model),
+        force: forceAnalysis,
+        model: requestedModel,
         timelineJson: (renderedAsset || asset).timelineJson as any,
       });
       res.json({
@@ -779,6 +892,7 @@ export async function registerRoutes(
           id: result.analysis.id,
           videoHash: result.analysis.videoHash,
           analysisJson: result.analysis.analysisJson,
+          sourceR2Key: result.analysis.sourceR2Key,
           modelUsed: result.analysis.modelUsed,
           analysisVersion: result.analysis.analysisVersion,
           createdAt: result.analysis.createdAt,
@@ -1098,9 +1212,24 @@ export async function registerRoutes(
         seconds: z.number().int().refine((value) => [4, 6, 8].includes(value), "seconds must be 4, 6, or 8"),
       });
       const { prompt, seconds } = schema.parse(req.body);
-      const videoBuffer = await generateGeminiTransitionVideo(prompt, seconds);
       const key = `generated-transitions/${req.user!.id}/${uuidv4().slice(0, 8)}.mp4`;
-      await uploadToR2(key, videoBuffer, "video/mp4");
+      await withHeavyWork(`gemini-transition user=${req.user!.id}`, async () => {
+        const workDir = path.join(os.tmpdir(), `gemini-transition-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const outputPath = path.join(workDir, "transition.mp4");
+
+        try {
+          await fs.promises.mkdir(workDir, { recursive: true });
+          logMemory("gemini-transition: before video download", { key });
+          await generateGeminiTransitionVideoFile(prompt, seconds, outputPath);
+          logMemory("gemini-transition: after video download", { key });
+          logMemory("gemini-transition: before r2 upload", { key });
+          await uploadFileToR2(key, outputPath, "video/mp4");
+          logMemory("gemini-transition: after r2 upload", { key });
+        } finally {
+          await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+          logMemory("gemini-transition: cleanup", { key });
+        }
+      });
       const url = await getSignedDownloadUrl(key);
       res.json({
         key,
@@ -1358,48 +1487,46 @@ export async function registerRoutes(
         return res.status(400).json({ error: "File does not appear to be a video format" });
       }
 
-      const workDir = path.join(os.tmpdir(), `music-convert-${Date.now()}`);
-      fs.mkdirSync(workDir, { recursive: true });
+      const audioKey = await withHeavyWork(`convert-music key=${r2Key}`, async () => {
+        const workDir = path.join(os.tmpdir(), `music-convert-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const inputPath = path.join(workDir, `input.${ext}`);
+        const outputPath = path.join(workDir, "output.mp3");
 
-      const inputPath = path.join(workDir, `input.${ext}`);
-      const outputPath = path.join(workDir, "output.mp3");
+        try {
+          await fs.promises.mkdir(workDir, { recursive: true });
 
-      const fileBuffer = await downloadFromR2(r2Key);
+          logMemory("convert-music: before r2 download", { key: r2Key });
+          await downloadFileFromR2(r2Key, inputPath);
+          logMemory("convert-music: after r2 download", { key: r2Key });
 
-      const maxSizeMB = 200;
-      if (fileBuffer.length > maxSizeMB * 1024 * 1024) {
-        return res.status(400).json({ error: `File too large (${(fileBuffer.length / 1024 / 1024).toFixed(0)} MB). Max is ${maxSizeMB} MB.` });
-      }
+          const inputStats = await fs.promises.stat(inputPath);
+          const maxSizeMB = 200;
+          if (inputStats.size > maxSizeMB * 1024 * 1024) {
+            throw new Error(`File too large (${(inputStats.size / 1024 / 1024).toFixed(0)} MB). Max is ${maxSizeMB} MB.`);
+          }
 
-      fs.writeFileSync(inputPath, fileBuffer);
+          logMemory("convert-music: before ffmpeg", { key: r2Key });
+          await runRouteFfmpeg([
+            "-i", inputPath,
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-ab", "192k",
+            "-ar", "44100",
+            "-y",
+            outputPath,
+          ]);
+          logMemory("convert-music: after ffmpeg", { key: r2Key });
 
-      await new Promise<void>((resolve, reject) => {
-        const { spawn } = require("child_process");
-        const ffmpeg = spawn(ffmpegStatic || "ffmpeg", [
-          "-i", inputPath,
-          "-vn",
-          "-acodec", "libmp3lame",
-          "-ab", "192k",
-          "-ar", "44100",
-          "-y",
-          outputPath,
-        ]);
-        let stderr = "";
-        ffmpeg.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        ffmpeg.on("close", (code: number) => {
-          if (code === 0) resolve();
-          else reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-        });
-        ffmpeg.on("error", reject);
+          const convertedKey = r2Key.replace(/\.[^.]+$/, ".mp3");
+          logMemory("convert-music: before r2 upload", { key: convertedKey });
+          await uploadFileToR2(convertedKey, outputPath, "audio/mpeg");
+          logMemory("convert-music: after r2 upload", { key: convertedKey });
+          return convertedKey;
+        } finally {
+          await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+          logMemory("convert-music: cleanup", { key: r2Key });
+        }
       });
-
-      const audioKey = r2Key.replace(/\.[^.]+$/, ".mp3");
-      const audioBuffer = fs.readFileSync(outputPath);
-      await uploadToR2(audioKey, audioBuffer, "audio/mpeg");
-
-      try { fs.unlinkSync(inputPath); } catch {}
-      try { fs.unlinkSync(outputPath); } catch {}
-      try { fs.rmdirSync(workDir); } catch {}
 
       res.json({ audioKey });
     } catch (err: any) {
@@ -1444,53 +1571,51 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Maximum clip duration is 60 seconds" });
       }
 
-      const workDir = path.join(os.tmpdir(), `trim-${Date.now()}`);
-      fs.mkdirSync(workDir, { recursive: true });
-
       const srcExt = sourceR2Key.split(".").pop()?.toLowerCase() || "mp4";
-      const inputPath = path.join(workDir, `source.${srcExt}`);
-      const outputPath = path.join(workDir, "trimmed.mp4");
+      const trimmedKey = await withHeavyWork(`trim-shot asset=${assetId}`, async () => {
+        const workDir = path.join(os.tmpdir(), `trim-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const inputPath = path.join(workDir, `source.${srcExt}`);
+        const outputPath = path.join(workDir, "trimmed.mp4");
 
-      const fileBuffer = await downloadFromR2(sourceR2Key);
+        try {
+          await fs.promises.mkdir(workDir, { recursive: true });
 
-      const maxSourceMB = 500;
-      if (fileBuffer.length > maxSourceMB * 1024 * 1024) {
-        return res.status(400).json({ error: `Source video too large (${(fileBuffer.length / 1024 / 1024).toFixed(0)} MB). Max is ${maxSourceMB} MB.` });
-      }
+          logMemory("trim-shot: before r2 download", { assetId, key: sourceR2Key });
+          await downloadFileFromR2(sourceR2Key, inputPath);
+          logMemory("trim-shot: after r2 download", { assetId, key: sourceR2Key });
 
-      fs.writeFileSync(inputPath, fileBuffer);
+          const inputStats = await fs.promises.stat(inputPath);
+          const maxSourceMB = 500;
+          if (inputStats.size > maxSourceMB * 1024 * 1024) {
+            throw new Error(`Source video too large (${(inputStats.size / 1024 / 1024).toFixed(0)} MB). Max is ${maxSourceMB} MB.`);
+          }
 
-      await new Promise<void>((resolve, reject) => {
-        const { spawn } = require("child_process");
-        const ffmpeg = spawn(ffmpegStatic || "ffmpeg", [
-          "-i", inputPath,
-          "-ss", String(start),
-          "-to", String(end),
-          "-c:v", "libx264",
-          "-preset", "fast",
-          "-c:a", "aac",
-          "-y",
-          outputPath,
-        ]);
-        let stderr = "";
-        ffmpeg.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        ffmpeg.on("close", (code: number) => {
-          if (code === 0) resolve();
-          else reject(new Error(`FFmpeg trim failed (code ${code}): ${stderr.slice(-500)}`));
-        });
-        ffmpeg.on("error", reject);
+          logMemory("trim-shot: before ffmpeg", { assetId, key: sourceR2Key });
+          await runRouteFfmpeg([
+            "-i", inputPath,
+            "-ss", String(start),
+            "-to", String(end),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            "-y",
+            outputPath,
+          ]);
+          logMemory("trim-shot: after ffmpeg", { assetId, key: sourceR2Key });
+
+          const uniqueId = uuidv4().slice(0, 8);
+          const outputKey = `shots/${assetId}/${uniqueId}.mp4`;
+          logMemory("trim-shot: before r2 upload", { assetId, key: outputKey });
+          await uploadFileToR2(outputKey, outputPath, "video/mp4");
+          logMemory("trim-shot: after r2 upload", { assetId, key: outputKey });
+          return outputKey;
+        } finally {
+          await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+          logMemory("trim-shot: cleanup", { assetId, key: sourceR2Key });
+        }
       });
 
-      const uniqueId = uuidv4().slice(0, 8);
-      const trimmedKey = `shots/${assetId}/${uniqueId}.mp4`;
-      const trimmedBuffer = fs.readFileSync(outputPath);
-      await uploadToR2(trimmedKey, trimmedBuffer, "video/mp4");
-
       const actualDuration = end - start;
-
-      try { fs.unlinkSync(inputPath); } catch {}
-      try { fs.unlinkSync(outputPath); } catch {}
-      try { fs.rmdirSync(workDir); } catch {}
 
       res.json({ key: trimmedKey, durationSec: Math.round(actualDuration * 10) / 10 });
     } catch (err: any) {
@@ -1799,6 +1924,30 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/general-prompts", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getAdminGeneralPrompts());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load admin general prompts" });
+    }
+  });
+
+  app.patch("/api/admin/general-prompts", requireAdmin, async (req, res) => {
+    try {
+      const data = z.object({
+        hookPrompt: z.string().optional().default(""),
+        captionPrompt: z.string().optional().default(""),
+        seoPrompt: z.string().optional().default(""),
+      }).parse(req.body);
+      res.json(await storage.updateAdminGeneralPrompts(data));
+    } catch (err: any) {
+      if (err?.issues) {
+        return res.status(400).json({ error: err.issues[0]?.message || "Invalid admin prompt request" });
+      }
+      res.status(500).json({ error: err.message || "Failed to save admin general prompts" });
+    }
+  });
+
   app.post("/api/admin/users", requireAdmin, async (req, res) => {
     try {
       const { username, password, role } = req.body;
@@ -1853,7 +2002,7 @@ export async function registerRoutes(
   app.get("/api/script-prompts", requireAuth, async (req, res) => {
     try {
       const prompts = await storage.getScriptPrompts(req.user!.role === "admin" ? undefined : req.user!.id);
-      res.json(prompts);
+      res.json(prompts.filter((prompt) => prompt.name !== ADMIN_GENERAL_PROMPTS_NAME));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

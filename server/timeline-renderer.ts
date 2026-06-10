@@ -5,6 +5,7 @@ import { basename, join } from "path";
 import { tmpdir } from "os";
 import { downloadFileFromR2, uploadFileToR2 } from "./r2";
 import { storage } from "./storage";
+import { logMemory, withHeavyWork } from "./heavy-work";
 
 type TimelineSource = {
   r2Key?: string;
@@ -158,7 +159,7 @@ const fitClipFilter = (item: TimelineItem, frameWidth: number, frameHeight: numb
     : `scale=${frameWidth}:${frameHeight}:force_original_aspect_ratio=increase,crop=${frameWidth}:${frameHeight}`
 );
 
-export async function renderTimelineVideo(assetId: number, timelineJson: TimelineJson): Promise<string> {
+async function renderTimelineVideoUnlocked(assetId: number, timelineJson: TimelineJson): Promise<string> {
   const asset = await storage.getAsset(assetId);
   logTimelineRenderInputs(assetId, timelineJson, asset?.videoKey);
   const videoItems = getTimelineVideoItems(timelineJson, assetId, asset?.videoKey);
@@ -183,7 +184,9 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
       if (!sourceKey) continue;
 
       const inputPath = join(workDir, `input_${index}.mp4`);
+      logMemory("studio-render: before r2 download", { assetId, key: sourceKey });
       await downloadFileFromR2(sourceKey, inputPath);
+      logMemory("studio-render: after r2 download", { assetId, key: sourceKey });
 
       const trimStart = Math.max(0, Number(item.trimStart || 0));
       const timelineDuration = Number(item.duration || 0);
@@ -218,6 +221,7 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
     }
 
     const outputPath = join(workDir, "studio-timeline.mp4");
+    logMemory("studio-render: before ffmpeg", { assetId });
     await runFfmpeg([
       ...ffmpegArgs,
       "-filter_complex", filterParts.join(";"),
@@ -229,11 +233,19 @@ export async function renderTimelineVideo(assetId: number, timelineJson: Timelin
       "-movflags", "+faststart",
       outputPath,
     ]);
+    logMemory("studio-render: after ffmpeg", { assetId });
 
     const r2Key = `timeline-renders/${assetId}/${Date.now()}.mp4`;
+    logMemory("studio-render: before r2 upload", { assetId, key: r2Key });
     await uploadFileToR2(r2Key, outputPath, "video/mp4");
+    logMemory("studio-render: after r2 upload", { assetId, key: r2Key });
     return r2Key;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    logMemory("studio-render: cleanup", { assetId });
   }
+}
+
+export async function renderTimelineVideo(assetId: number, timelineJson: TimelineJson): Promise<string> {
+  return withHeavyWork(`studio-render asset=${assetId}`, () => renderTimelineVideoUnlocked(assetId, timelineJson));
 }

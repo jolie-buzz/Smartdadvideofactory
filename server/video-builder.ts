@@ -5,6 +5,7 @@ import { writeFile, unlink, mkdtemp } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import ffmpegStatic from "ffmpeg-static";
+import { logMemory, withHeavyWork } from "./heavy-work";
 
 const BUILDER_RENDER_WIDTH = Math.max(360, parseInt(process.env.BUILDER_RENDER_WIDTH || "720", 10));
 const BUILDER_RENDER_HEIGHT = Math.max(640, parseInt(process.env.BUILDER_RENDER_HEIGHT || "1280", 10));
@@ -29,7 +30,7 @@ const TEMPLATES: Record<number, { hook: number; problem: number; solution: numbe
   60: { hook: 3, problem: 1.5, solution: 1.5, highlight: 3, bodyCount: 8, bodyDur: 6, cta: 3 },
 };
 
-export async function renderVariant(variantId: number): Promise<void> {
+async function renderVariantUnlocked(variantId: number): Promise<void> {
   const variant = await storage.getVariant(variantId);
   if (!variant) throw new Error("Variant not found");
 
@@ -50,7 +51,9 @@ export async function renderVariant(variantId: number): Promise<void> {
     for (const shot of orderedShots) {
       if (!shot) continue;
       const clipPath = join(workDir, `clip_${idx}.mp4`);
+      logMemory("variant-render: before r2 download", { variantId, shotId: shot.id, key: shot.r2Key });
       await downloadFileFromR2(shot.r2Key, clipPath);
+      logMemory("variant-render: after r2 download", { variantId, shotId: shot.id, key: shot.r2Key });
 
       let targetDur: number;
       if (idx === 0) targetDur = template.hook;
@@ -61,6 +64,7 @@ export async function renderVariant(variantId: number): Promise<void> {
       else targetDur = template.bodyDur;
 
       const trimmedPath = join(workDir, `trimmed_${idx}.mp4`);
+      logMemory("variant-render: before clip ffmpeg", { variantId, shotId: shot.id });
       await runFFmpeg([
         "-y", "-i", clipPath,
         "-t", targetDur.toString(),
@@ -71,6 +75,7 @@ export async function renderVariant(variantId: number): Promise<void> {
         "-an",
         trimmedPath,
       ]);
+      logMemory("variant-render: after clip ffmpeg", { variantId, shotId: shot.id });
 
       clipPaths.push(trimmedPath);
       durations.push(targetDur);
@@ -82,6 +87,7 @@ export async function renderVariant(variantId: number): Promise<void> {
     await writeFile(concatListPath, concatContent);
 
     const outputPath = join(workDir, "output.mp4");
+    logMemory("variant-render: before concat ffmpeg", { variantId });
     await runFFmpeg([
       "-y", "-f", "concat", "-safe", "0", "-i", concatListPath,
       "-c:v", "libx264", "-preset", BUILDER_RENDER_PRESET, "-crf", "24",
@@ -89,9 +95,12 @@ export async function renderVariant(variantId: number): Promise<void> {
       "-movflags", "+faststart",
       outputPath,
     ]);
+    logMemory("variant-render: after concat ffmpeg", { variantId });
 
     const r2Key = `variants/${variant.assetId}/${variantId}.mp4`;
+    logMemory("variant-render: before r2 upload", { variantId, key: r2Key });
     await uploadFileToR2(r2Key, outputPath, "video/mp4");
+    logMemory("variant-render: after r2 upload", { variantId, key: r2Key });
 
     await storage.updateVariant(variantId, { r2Key, status: "done" });
   } catch (err) {
@@ -106,5 +115,10 @@ export async function renderVariant(variantId: number): Promise<void> {
       }
       await fsPromises.rmdir(workDir).catch(() => {});
     } catch {}
+    logMemory("variant-render: cleanup", { variantId });
   }
+}
+
+export async function renderVariant(variantId: number): Promise<void> {
+  return withHeavyWork(`variant-render id=${variantId}`, () => renderVariantUnlocked(variantId));
 }

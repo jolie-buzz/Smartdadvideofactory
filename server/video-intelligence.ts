@@ -6,6 +6,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { storage } from "./storage";
 import { downloadFileFromR2, hashFileSha256 } from "./r2";
+import { logMemory, withHeavyWork } from "./heavy-work";
 import type { Asset, VideoAnalysis } from "@shared/schema";
 
 export const VIDEO_ANALYSIS_VERSION = "video-intelligence-v2";
@@ -299,6 +300,7 @@ export async function ensureVideoAnalysisForAsset(
   asset: Asset,
   options: { force?: boolean; model?: string; analysisVersion?: string; timelineJson?: Record<string, any> | null } = {},
 ): Promise<{ analysis: VideoAnalysis; reused: boolean; videoHash: string; source: AnalysisTarget["source"] }> {
+  return withHeavyWork(`video-analysis asset=${asset.id}`, async () => {
   const model = options.model || VIDEO_ANALYSIS_MODEL;
   const analysisVersion = options.analysisVersion || VIDEO_ANALYSIS_VERSION;
   const target = await getAssetAnalysisTarget(asset);
@@ -306,11 +308,24 @@ export async function ensureVideoAnalysisForAsset(
     throw new Error("No video found to analyze. Upload or save a Studio video first.");
   }
 
+  if (!options.force) {
+    const latest = await storage.getLatestVideoAnalysisForAsset(asset.id);
+    if (
+      latest?.sourceR2Key === target.r2Key
+      && latest.analysisVersion === analysisVersion
+      && latest.modelUsed === model
+    ) {
+      return { analysis: latest, reused: true, videoHash: latest.videoHash, source: target.source };
+    }
+  }
+
   const workDir = await mkdtemp(join(tmpdir(), "video-analysis-source-"));
   const inputPath = join(workDir, "source.mp4");
 
   try {
+    logMemory("video-analysis: before r2 download", { assetId: asset.id, key: target.r2Key });
     await downloadFileFromR2(target.r2Key, inputPath);
+    logMemory("video-analysis: after r2 download", { assetId: asset.id, key: target.r2Key });
     const videoHash = await hashFileSha256(inputPath);
 
     if (!options.force) {
@@ -323,6 +338,7 @@ export async function ensureVideoAnalysisForAsset(
           videoAssetId: asset.id,
           videoHash,
           analysisJson: cached.analysisJson,
+          sourceR2Key: target.r2Key,
           modelUsed: model,
           analysisVersion,
         });
@@ -342,6 +358,7 @@ export async function ensureVideoAnalysisForAsset(
       videoAssetId: asset.id,
       videoHash,
       analysisJson,
+      sourceR2Key: target.r2Key,
       modelUsed: model,
       analysisVersion,
     });
@@ -349,7 +366,9 @@ export async function ensureVideoAnalysisForAsset(
     return { analysis, reused: false, videoHash, source: target.source };
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    logMemory("video-analysis: cleanup", { assetId: asset.id });
   }
+  });
 }
 
 export function summarizeVideoAnalysisForPrompt(analysis?: VideoAnalysis | null): string {

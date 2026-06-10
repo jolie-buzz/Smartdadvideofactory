@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, KeyRound, LogOut, Pencil, Plus, Shield, Trash2, User, X } from "lucide-react";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Check, KeyRound, Loader2, LogOut, Music, Pencil, Plus, Shield, Sparkles, Trash2, Upload, User, X } from "lucide-react";
+import { invalidateAssetsCache, queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,63 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import type { ScriptPrompt } from "@shared/schema";
+
+type MusicLibraryTrack = {
+  id: number;
+  name: string;
+  musicKey: string;
+  musicUrl: string | null;
+};
+
+type AdminGeneralPrompts = {
+  hookPrompt: string;
+  captionPrompt: string;
+  seoPrompt: string;
+};
+
+async function uploadMusicWithProgress(
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<{ key: string }> {
+  const res = await fetch("/api/upload-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "music",
+      assetId: `admin-music-${crypto.randomUUID()}`,
+      filename: file.name,
+      contentType: file.type || "audio/mpeg",
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to get upload URL (${res.status})`);
+  }
+
+  const { url, key } = await res.json();
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", file.type || "audio/mpeg");
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Upload failed (${xhr.status})`));
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error")));
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.send(file);
+  });
+
+  return { key };
+}
 
 export function StudioSettingsPanel() {
   const { user, logout } = useAuth();
@@ -28,6 +83,11 @@ export function StudioSettingsPanel() {
   const [editingPromptId, setEditingPromptId] = useState<number | null>(null);
   const [editPromptName, setEditPromptName] = useState("");
   const [editPromptText, setEditPromptText] = useState("");
+  const [adminMusicProgress, setAdminMusicProgress] = useState(0);
+  const [adminPromptHook, setAdminPromptHook] = useState("");
+  const [adminPromptCaption, setAdminPromptCaption] = useState("");
+  const [adminPromptSeo, setAdminPromptSeo] = useState("");
+  const adminMusicInputRef = useRef<HTMLInputElement>(null);
 
   const settingsQuery = useQuery<{ excludedWords: string | null }>({
     queryKey: ["/api/settings"],
@@ -37,11 +97,29 @@ export function StudioSettingsPanel() {
     queryKey: ["/api/script-prompts"],
   });
 
+  const musicLibraryQuery = useQuery<MusicLibraryTrack[]>({
+    queryKey: ["/api/music-library"],
+    enabled: user?.role === "admin",
+  });
+
+  const adminPromptsQuery = useQuery<AdminGeneralPrompts>({
+    queryKey: ["/api/admin/general-prompts"],
+    enabled: user?.role === "admin",
+  });
+
   useEffect(() => {
     if (settingsQuery.data) {
       setExcludedWordsInput(settingsQuery.data.excludedWords ?? "");
     }
   }, [settingsQuery.data]);
+
+  useEffect(() => {
+    if (adminPromptsQuery.data) {
+      setAdminPromptHook(adminPromptsQuery.data.hookPrompt || "");
+      setAdminPromptCaption(adminPromptsQuery.data.captionPrompt || "");
+      setAdminPromptSeo(adminPromptsQuery.data.seoPrompt || "");
+    }
+  }, [adminPromptsQuery.data]);
 
   const saveSettingsMutation = useMutation({
     mutationFn: async (data: { excludedWords: string }) => {
@@ -102,6 +180,49 @@ export function StudioSettingsPanel() {
     },
   });
 
+  const adminMusicMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      const tracks = [];
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const result = await uploadMusicWithProgress(
+          file,
+          (percent) => setAdminMusicProgress(Math.round(((index + percent / 100) / files.length) * 100)),
+        );
+        tracks.push({
+          name: file.name.replace(/\.[^.]+$/, "") || file.name,
+          musicKey: result.key,
+        });
+      }
+      const res = await apiRequest("POST", "/api/admin/music-library", { tracks });
+      return res.json();
+    },
+    onSuccess: (tracks) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/music-library"] });
+      invalidateAssetsCache();
+      setAdminMusicProgress(0);
+      toast({ title: "Music added", description: `${tracks.length} track${tracks.length === 1 ? "" : "s"} added to the app library.` });
+    },
+    onError: (err: Error) => {
+      setAdminMusicProgress(0);
+      toast({ title: "Music upload error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveAdminPromptsMutation = useMutation({
+    mutationFn: async (data: AdminGeneralPrompts) => {
+      const res = await apiRequest("PATCH", "/api/admin/general-prompts", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/general-prompts"] });
+      toast({ title: "Admin prompts saved", description: "These will be added to future hook, caption, and SEO generations." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Prompt save error", description: err.message, variant: "destructive" });
+    },
+  });
+
   const changePasswordMutation = useMutation({
     mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
       const res = await apiRequest("PATCH", "/api/auth/password", data);
@@ -155,6 +276,135 @@ export function StudioSettingsPanel() {
             </div>
           </CardContent>
         </Card>
+
+        {user?.role === "admin" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Admin Settings
+              </CardTitle>
+              <CardDescription>
+                Global hidden settings for every user and setup.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <h3 className="flex items-center gap-2 text-sm font-medium">
+                      <Music className="h-4 w-4" />
+                      Music Library
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Add multiple tracks once, then reuse them in any setup.
+                    </p>
+                  </div>
+                  <input
+                    ref={adminMusicInputRef}
+                    type="file"
+                    accept="audio/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("audio/"));
+                      if (!files.length) {
+                        toast({ title: "No audio files", description: "Please choose MP3, WAV, M4A, or another audio file.", variant: "destructive" });
+                        return;
+                      }
+                      adminMusicMutation.mutate(files);
+                      event.target.value = "";
+                    }}
+                    data-testid="input-admin-settings-music-library"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => adminMusicInputRef.current?.click()}
+                    disabled={adminMusicMutation.isPending}
+                    data-testid="button-admin-settings-upload-music"
+                  >
+                    {adminMusicMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    Upload Music
+                  </Button>
+                </div>
+                {adminMusicMutation.isPending && (
+                  <div className="space-y-1">
+                    <Progress value={adminMusicProgress} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Uploading music... {adminMusicProgress}%</p>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {(musicLibraryQuery.data?.length ?? 0)} uploaded track{musicLibraryQuery.data?.length === 1 ? "" : "s"} available.
+                </p>
+              </div>
+
+              <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
+                <div className="space-y-1">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <Sparkles className="h-4 w-4" />
+                    Global Prompt Add-ons
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    These hidden admin prompts are appended after each setup prompt for all users.
+                  </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-hook-prompt">Hook add-on</Label>
+                    <Textarea
+                      id="admin-hook-prompt"
+                      value={adminPromptHook}
+                      onChange={(event) => setAdminPromptHook(event.target.value)}
+                      rows={6}
+                      placeholder="Extra global hook direction..."
+                      disabled={adminPromptsQuery.isLoading || saveAdminPromptsMutation.isPending}
+                      data-testid="input-admin-hook-prompt"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-caption-prompt">Caption add-on</Label>
+                    <Textarea
+                      id="admin-caption-prompt"
+                      value={adminPromptCaption}
+                      onChange={(event) => setAdminPromptCaption(event.target.value)}
+                      rows={6}
+                      placeholder="Extra global caption direction..."
+                      disabled={adminPromptsQuery.isLoading || saveAdminPromptsMutation.isPending}
+                      data-testid="input-admin-caption-prompt"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-seo-prompt">SEO add-on</Label>
+                    <Textarea
+                      id="admin-seo-prompt"
+                      value={adminPromptSeo}
+                      onChange={(event) => setAdminPromptSeo(event.target.value)}
+                      rows={6}
+                      placeholder="Extra global SEO direction..."
+                      disabled={adminPromptsQuery.isLoading || saveAdminPromptsMutation.isPending}
+                      data-testid="input-admin-seo-prompt"
+                    />
+                  </div>
+                </div>
+                <Button
+                  className="gap-2"
+                  onClick={() => saveAdminPromptsMutation.mutate({
+                    hookPrompt: adminPromptHook,
+                    captionPrompt: adminPromptCaption,
+                    seoPrompt: adminPromptSeo,
+                  })}
+                  disabled={adminPromptsQuery.isLoading || saveAdminPromptsMutation.isPending}
+                  data-testid="button-save-admin-general-prompts"
+                >
+                  {saveAdminPromptsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Save Admin Prompts
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

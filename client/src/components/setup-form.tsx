@@ -54,6 +54,13 @@ type AssetMediaUrls = {
   musicUrl: string | null;
 };
 
+type MusicLibraryTrack = {
+  id: number;
+  name: string;
+  musicKey: string;
+  musicUrl: string | null;
+};
+
 type VideoAnalysisStatus = {
   status: "ready" | "missing";
   canAnalyze: boolean;
@@ -415,6 +422,9 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const assetsQuery = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
   });
+  const musicLibraryQuery = useQuery<MusicLibraryTrack[]>({
+    queryKey: ["/api/music-library"],
+  });
   const currentMedia = editingAsset ? mediaUrlsQuery.data?.[editingAsset.id] : undefined;
   const videoAnalysis = videoAnalysisQuery.data?.analysis;
   const videoAnalysisJson = videoAnalysis?.analysisJson || null;
@@ -438,9 +448,13 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     !normalizedVoiceSearch || voice.name.toLowerCase().includes(normalizedVoiceSearch)
   );
   const selectedVoice = voicesQuery.data?.find((voice) => voice.voice_id === voiceId);
-  const uploadedMusicOptions = (assetsQuery.data || [])
-    .filter((asset) => asset.musicKey)
-    .map((asset) => ({ key: asset.musicKey!, label: asset.name, url: mediaUrlsQuery.data?.[asset.id]?.musicUrl || null }));
+  const uploadedMusicOptions = Array.from(new Map([
+    ...(assetsQuery.data || [])
+      .filter((asset) => asset.musicKey && asset.personaPrompt !== "__ADMIN_MUSIC_LIBRARY__")
+      .map((asset) => [asset.musicKey!, { key: asset.musicKey!, label: asset.name, url: mediaUrlsQuery.data?.[asset.id]?.musicUrl || null }] as const),
+    ...(musicLibraryQuery.data || [])
+      .map((track) => [track.musicKey, { key: track.musicKey, label: track.name, url: track.musicUrl }] as const),
+  ]).values());
   const selectedFreeMusicTrack = FREE_MUSIC_LIBRARY.find((track) => `public:${track.uri}` === selectedMusicKey);
   const selectedUploadedMusicOption = uploadedMusicOptions.find((option) => option.key === selectedMusicKey);
   const selectedMusicPreviewUrl = selectedFreeMusicTrack?.uri || selectedUploadedMusicOption?.url || "";

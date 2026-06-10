@@ -2,6 +2,14 @@ import { db } from "./db";
 import { users, assets, jobs, shots, variants, scriptPrompts, videoAnalyses, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant, type ScriptPrompt, type InsertScriptPrompt, type VideoAnalysis, type InsertVideoAnalysis } from "@shared/schema";
 import { eq, desc, inArray, and, asc } from "drizzle-orm";
 
+export type AdminGeneralPrompts = {
+  hookPrompt: string;
+  captionPrompt: string;
+  seoPrompt: string;
+};
+
+const ADMIN_GENERAL_PROMPTS_NAME = "__ADMIN_GENERAL_PROMPTS__";
+
 export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   getUser(id: number): Promise<User | undefined>;
@@ -20,6 +28,7 @@ export interface IStorage {
   getJobs(userId?: number): Promise<(Job & { assetName?: string })[]>;
   getJob(id: number): Promise<Job | undefined>;
   claimQueuedJob(id: number): Promise<Job | undefined>;
+  getQueuedJobs(): Promise<Job[]>;
   updateJob(id: number, data: Partial<Job>): Promise<Job | undefined>;
   appendJobLog(id: number, message: string): Promise<void>;
   deleteJob(id: number): Promise<void>;
@@ -43,6 +52,8 @@ export interface IStorage {
   createScriptPrompt(data: InsertScriptPrompt): Promise<ScriptPrompt>;
   updateScriptPrompt(id: number, userId: number | undefined, data: Partial<InsertScriptPrompt>): Promise<ScriptPrompt | undefined>;
   deleteScriptPrompt(id: number, userId?: number): Promise<void>;
+  getAdminGeneralPrompts(): Promise<AdminGeneralPrompts>;
+  updateAdminGeneralPrompts(data: AdminGeneralPrompts): Promise<AdminGeneralPrompts>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -144,10 +155,14 @@ export class DatabaseStorage implements IStorage {
   async claimQueuedJob(id: number): Promise<Job | undefined> {
     const [result] = await db
       .update(jobs)
-      .set({ status: "processing" })
+      .set({ status: "processing", lastError: null })
       .where(and(eq(jobs.id, id), eq(jobs.status, "queued")))
       .returning();
     return result;
+  }
+
+  async getQueuedJobs(): Promise<Job[]> {
+    return db.select().from(jobs).where(eq(jobs.status, "queued")).orderBy(asc(jobs.createdAt));
   }
 
   async updateJob(id: number, data: Partial<Job>): Promise<Job | undefined> {
@@ -289,6 +304,44 @@ export class DatabaseStorage implements IStorage {
       ? eq(scriptPrompts.id, id)
       : and(eq(scriptPrompts.id, id), eq(scriptPrompts.userId, userId));
     await db.delete(scriptPrompts).where(whereClause);
+  }
+
+  async getAdminGeneralPrompts(): Promise<AdminGeneralPrompts> {
+    const [record] = await db
+      .select()
+      .from(scriptPrompts)
+      .where(and(eq(scriptPrompts.userId, 0), eq(scriptPrompts.name, ADMIN_GENERAL_PROMPTS_NAME)));
+    if (!record?.promptText) return { hookPrompt: "", captionPrompt: "", seoPrompt: "" };
+    try {
+      const parsed = JSON.parse(record.promptText) as Partial<AdminGeneralPrompts>;
+      return {
+        hookPrompt: typeof parsed.hookPrompt === "string" ? parsed.hookPrompt : "",
+        captionPrompt: typeof parsed.captionPrompt === "string" ? parsed.captionPrompt : "",
+        seoPrompt: typeof parsed.seoPrompt === "string" ? parsed.seoPrompt : "",
+      };
+    } catch {
+      return { hookPrompt: "", captionPrompt: "", seoPrompt: "" };
+    }
+  }
+
+  async updateAdminGeneralPrompts(data: AdminGeneralPrompts): Promise<AdminGeneralPrompts> {
+    const normalized = {
+      hookPrompt: data.hookPrompt || "",
+      captionPrompt: data.captionPrompt || "",
+      seoPrompt: data.seoPrompt || "",
+    };
+    const promptText = JSON.stringify(normalized);
+    const [existing] = await db
+      .select()
+      .from(scriptPrompts)
+      .where(and(eq(scriptPrompts.userId, 0), eq(scriptPrompts.name, ADMIN_GENERAL_PROMPTS_NAME)));
+
+    if (existing) {
+      await db.update(scriptPrompts).set({ promptText }).where(eq(scriptPrompts.id, existing.id));
+    } else {
+      await db.insert(scriptPrompts).values({ userId: 0, name: ADMIN_GENERAL_PROMPTS_NAME, promptText });
+    }
+    return normalized;
   }
 }
 

@@ -1,5 +1,5 @@
 import { storage } from "./storage";
-import { uploadToR2, uploadFileToR2, downloadFromR2, downloadFileFromR2, getSignedDownloadUrl } from "./r2";
+import { uploadToR2, uploadFileToR2, downloadFileFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { renderTimelineVideo } from "./timeline-renderer";
 import { ensureVideoAnalysisForAsset, summarizeVideoAnalysisForPrompt } from "./video-intelligence";
@@ -11,6 +11,7 @@ import { tmpdir } from "os";
 import ffmpegStatic from "ffmpeg-static";
 import OpenAI from "openai";
 import { sanitizeNarrationScript } from "@shared/script-cleaner";
+import { logMemory, withHeavyWork } from "./heavy-work";
 
 function createLlmClient(): OpenAI | null {
   if (process.env.DEEPSEEK_API_KEY) {
@@ -35,6 +36,7 @@ function createLlmClient(): OpenAI | null {
 }
 
 const llmClient = createLlmClient();
+const MAX_INTERRUPTED_JOB_RECOVERIES = Math.max(1, parseInt(process.env.MAX_INTERRUPTED_JOB_RECOVERIES || "2", 10));
 
 function getLlmClient(): OpenAI {
   if (!llmClient) {
@@ -87,6 +89,15 @@ async function getMusicInput(musicKey: string | null): Promise<string | null> {
   if (publicInput) return publicInput;
   if (musicKey.startsWith("public:")) return null;
   return getSignedDownloadUrl(musicKey);
+}
+
+function appendAdminPrompt(setupPrompt: string | null, adminPrompt: string | null): string | null {
+  const setup = setupPrompt?.trim() || "";
+  const admin = adminPrompt?.trim() || "";
+  if (!setup && !admin) return null;
+  if (!admin) return setup;
+  if (!setup) return `Admin global instruction:\n${admin}`;
+  return `${setup}\n\nAdmin global instruction:\n${admin}`;
 }
 
 async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null, videoAnalysisSummary?: string): Promise<string> {
@@ -432,6 +443,7 @@ async function generateSeoKeywords(seoPrompt: string | null, photoUrl: string | 
 }
 
 async function processJob(jobId: number): Promise<void> {
+  return withHeavyWork(`worker job=${jobId}`, async () => {
   const job = await storage.claimQueuedJob(jobId);
   if (!job) return;
 
@@ -631,12 +643,18 @@ async function processJob(jobId: number): Promise<void> {
 
     let videoAnalysisSummary = "";
     try {
-      await storage.appendJobLog(jobId, "Checking reusable video analysis cache...");
-      const videoAnalysisResult = await ensureVideoAnalysisForAsset(asset, { timelineJson: asset.timelineJson as any });
-      videoAnalysisSummary = summarizeVideoAnalysisForPrompt(videoAnalysisResult.analysis);
-      await storage.appendJobLog(jobId, videoAnalysisResult.reused
-        ? "Video analysis reused from saved cache."
-        : "Video analysis created from extracted keyframes and saved.");
+      await storage.appendJobLog(jobId, "Checking saved reusable video analysis...");
+      const savedVideoAnalysis = await storage.getLatestVideoAnalysisForAsset(asset.id);
+      if (savedVideoAnalysis) {
+        videoAnalysisSummary = summarizeVideoAnalysisForPrompt(savedVideoAnalysis);
+        await storage.appendJobLog(jobId, "Video analysis reused from saved setup cache.");
+      } else {
+        const videoAnalysisResult = await ensureVideoAnalysisForAsset(asset, { timelineJson: asset.timelineJson as any });
+        videoAnalysisSummary = summarizeVideoAnalysisForPrompt(videoAnalysisResult.analysis);
+        await storage.appendJobLog(jobId, videoAnalysisResult.reused
+          ? "Video analysis reused from content hash cache."
+          : "Video analysis created from extracted keyframes and saved.");
+      }
     } catch (err: any) {
       await storage.appendJobLog(jobId, `Warning: Video analysis unavailable: ${err.message}. Continuing with product photo and prompt.`);
     }
@@ -690,22 +708,30 @@ async function processJob(jobId: number): Promise<void> {
     };
     const renderFinalVideo = async () => {
       try {
+        logMemory("worker: before ffmpeg final render", { jobId });
         await combineAllInOne(shouldMixVoice ? voiceRawPath : null, videoUrl, musicUrl, finalPath, combineSettings);
+        logMemory("worker: after ffmpeg final render", { jobId });
       } catch (err) {
         await storage.appendJobLog(
           jobId,
           `FFmpeg stream pass failed (${describeError(err)}). Downloading source video and retrying locally...`,
         );
         const localVideoPath = join(workDir, "source_video.mp4");
+        logMemory("worker: before fallback r2 download", { jobId, key: asset.videoKey });
         await downloadFileFromR2(asset.videoKey, localVideoPath);
+        logMemory("worker: after fallback r2 download", { jobId, key: asset.videoKey });
+        logMemory("worker: before fallback ffmpeg final render", { jobId });
         await combineAllInOne(shouldMixVoice ? voiceRawPath : null, localVideoPath, musicUrl, finalPath, combineSettings);
+        logMemory("worker: after fallback ffmpeg final render", { jobId });
       }
     };
 
+    logMemory("worker: before raw audio upload/render", { jobId });
     await Promise.all([
       uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
       renderFinalVideo(),
     ]);
+    logMemory("worker: after raw audio upload/render", { jobId });
 
     await storage.updateJob(jobId, { audioRawKey });
     await storage.appendJobLog(jobId, "FFmpeg pass complete.");
@@ -728,12 +754,17 @@ async function processJob(jobId: number): Promise<void> {
 
     // ── Step 5: Parallel AI text outputs ────────────────────────────────────
     const textTasks: Promise<void>[] = [];
+    const adminPrompts = await storage.getAdminGeneralPrompts();
 
     if (asset.hookHeadline) {
       textTasks.push((async () => {
         try {
           await storage.appendJobLog(jobId, "Generating hook headline...");
-          const headline = await generateHookHeadline(asset.hookPrompt, photoUrl, asset.hookModel || asset.openaiModel);
+          const headline = await generateHookHeadline(
+            appendAdminPrompt(asset.hookPrompt, adminPrompts.hookPrompt),
+            photoUrl,
+            asset.hookModel || asset.openaiModel,
+          );
           await storage.updateJob(jobId, { headlineText: headline });
           await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
         } catch (err: any) {
@@ -746,7 +777,11 @@ async function processJob(jobId: number): Promise<void> {
       textTasks.push((async () => {
         try {
           await storage.appendJobLog(jobId, "Generating social media caption...");
-          const caption = await generateCaption(asset.captionPrompt, photoUrl, asset.captionModel || asset.openaiModel);
+          const caption = await generateCaption(
+            appendAdminPrompt(asset.captionPrompt, adminPrompts.captionPrompt),
+            photoUrl,
+            asset.captionModel || asset.openaiModel,
+          );
           await storage.updateJob(jobId, { captionText: caption });
           await storage.appendJobLog(jobId, "Caption generated");
         } catch (err: any) {
@@ -759,7 +794,11 @@ async function processJob(jobId: number): Promise<void> {
       textTasks.push((async () => {
         try {
           await storage.appendJobLog(jobId, "Generating SEO keywords & hashtags...");
-          const seo = await generateSeoKeywords(asset.seoPrompt, photoUrl, asset.seoModel || asset.openaiModel);
+          const seo = await generateSeoKeywords(
+            appendAdminPrompt(asset.seoPrompt, adminPrompts.seoPrompt),
+            photoUrl,
+            asset.seoModel || asset.openaiModel,
+          );
           await storage.updateJob(jobId, { seoText: seo });
           await storage.appendJobLog(jobId, "SEO keywords generated");
         } catch (err: any) {
@@ -776,18 +815,22 @@ async function processJob(jobId: number): Promise<void> {
     // ── Step 6: Upload final video ───────────────────────────────────────────
     await storage.appendJobLog(jobId, "Uploading final video to R2...");
     const finalVideoKey = `jobs/${jobId}/final.mp4`;
+    logMemory("worker: before final upload", { jobId, key: finalVideoKey });
     await uploadFileToR2(finalVideoKey, outputPath, "video/mp4");
+    logMemory("worker: after final upload", { jobId, key: finalVideoKey });
     const finalStats = await stat(outputPath);
-    await storage.updateJob(jobId, { finalVideoKey, status: "done" });
+    await storage.updateJob(jobId, { finalVideoKey, status: "done", lastError: null });
     await storage.appendJobLog(jobId, `Done! Final video uploaded (${(finalStats.size / 1024 / 1024).toFixed(2)} MB).`);
 
   } catch (err: any) {
     console.error(`Job ${jobId} failed:`, err);
-    await storage.updateJob(jobId, { status: "failed" });
+    await storage.updateJob(jobId, { status: "failed", lastError: err.message || String(err) });
     await storage.appendJobLog(jobId, `FAILED: ${err.message || String(err)}`);
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    logMemory("worker: cleanup", { jobId });
   }
+  });
 }
 
 const TERMINAL_STATUSES = ["queued", "done", "failed"];
@@ -799,8 +842,24 @@ async function recoverStuckJobs(): Promise<void> {
     if (stuck.length === 0) return;
     console.log(`[worker] Recovering ${stuck.length} stuck job(s)...`);
     for (const job of stuck) {
-      await storage.updateJob(job.id, { status: "queued" });
-      await storage.appendJobLog(job.id, "Job was interrupted — re-queued automatically on server restart.");
+      const failedAttempts = (job.failedAttempts || 0) + 1;
+      if (failedAttempts > MAX_INTERRUPTED_JOB_RECOVERIES) {
+        const message = `Job was interrupted ${failedAttempts} time(s), likely by an instance crash. Not re-queueing automatically.`;
+        await storage.updateJob(job.id, {
+          status: "failed",
+          failedAttempts,
+          lastError: message,
+        });
+        await storage.appendJobLog(job.id, message);
+        continue;
+      }
+
+      await storage.updateJob(job.id, {
+        status: "queued",
+        failedAttempts,
+        lastError: `Interrupted during status "${job.status}"`,
+      });
+      await storage.appendJobLog(job.id, `Job was interrupted — automatic recovery attempt ${failedAttempts}/${MAX_INTERRUPTED_JOB_RECOVERIES}.`);
     }
   } catch (err) {
     console.error("[worker] Error recovering stuck jobs:", err);
@@ -814,8 +873,7 @@ async function pollJobs() {
   workerRunning = true;
 
   try {
-    const allJobs = await storage.getJobs();
-    const queued = allJobs.filter((j) => j.status === "queued");
+    const queued = await storage.getQueuedJobs();
     for (const job of queued) {
       await processJob(job.id);
       // Brief pause between jobs: lets GC free memory buffers from prior job

@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import {
   ArrowRight,
   BadgePercent,
-  CheckCircle2,
   Clapperboard,
   GraduationCap,
   MessageCircle,
@@ -97,11 +96,10 @@ export function StudioOnboarding({ onStart }: StudioOnboardingProps) {
     () => studioGoals.find((goal) => goal.id === selectedGoalId) || studioGoals[0],
     [selectedGoalId],
   );
-  const SelectedIcon = selectedGoal.icon;
 
   return (
     <main className="min-h-screen overflow-y-auto bg-[#070a0f] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pb-5 pt-[calc(env(safe-area-inset-top)+22px)] sm:px-6 sm:pt-6 lg:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 pb-6 pt-[calc(env(safe-area-inset-top)+22px)] sm:px-6 sm:pt-6 lg:px-8">
         <header className="flex min-h-12 items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#ffc400] text-black shadow-[0_0_28px_rgba(255,196,0,0.32)]">
@@ -118,95 +116,58 @@ export function StudioOnboarding({ onStart }: StudioOnboardingProps) {
           </div>
         </header>
 
-        <section className="grid flex-1 items-center gap-5 py-6 lg:grid-cols-[minmax(340px,0.9fr)_minmax(520px,1.1fr)] lg:py-8">
-          <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-white/10 bg-[#101620] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.28)]">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-full bg-[#ffc400]/15 text-[#ffc400]">
-                  <MessageCircle className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#ffc400]">Buzzly Studio</p>
-                  <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">What are you making today?</h1>
-                </div>
-              </div>
-              <p className="max-w-xl text-sm leading-6 text-slate-300">
-                Choose the video goal first. After this, Buzzly will take you to the setup where you add product details, clips, voice, and job settings.
-              </p>
+        <section className="flex flex-1 flex-col items-center justify-center gap-5 py-8 text-center">
+          <div className="mx-auto max-w-2xl">
+            <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-full bg-[#ffc400]/15 text-[#ffc400]">
+              <MessageCircle className="h-5 w-5" />
             </div>
-
-            <div className="rounded-lg border border-white/10 bg-[#0c111a] p-5">
-              <div className="flex items-start gap-3">
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-400/10 text-emerald-300">
-                  <CheckCircle2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">Simple flow</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Pick goal, create setup, upload clips, generate job, review output. Studio becomes the main place, pero guided muna ang first step.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#ffc400]">Buzzly Studio</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">What are you making today?</h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400">
+              Choose a video goal first. Buzzly will open the guided setup after this.
+            </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {studioGoals.map((goal) => {
-                const Icon = goal.icon;
-                const isSelected = goal.id === selectedGoal.id;
-                return (
-                  <button
-                    key={goal.id}
-                    type="button"
-                    onClick={() => setSelectedGoalId(goal.id)}
-                    className={`group min-h-[118px] rounded-lg border p-4 text-left transition ${
-                      isSelected
-                        ? "border-[#ffc400] bg-[#ffc400]/10 shadow-[0_0_0_1px_rgba(255,196,0,0.25)]"
-                        : "border-white/10 bg-[#101620]/85 hover:border-white/25 hover:bg-[#151d2a]"
-                    }`}
-                  >
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div className={`grid h-10 w-10 place-items-center rounded-md ${
-                        isSelected ? "bg-[#ffc400] text-black" : "bg-white/[0.06] text-[#ffc400]"
-                      }`}>
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      {goal.recommended && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-1 text-[11px] font-semibold text-emerald-300">
-                          <Star className="h-3 w-3 fill-emerald-300" />
-                          Recommended
-                        </span>
-                      )}
-                    </div>
-                    <h2 className="text-sm font-semibold text-white">{goal.title}</h2>
-                    <p className="mt-2 text-xs leading-5 text-slate-400">{goal.description}</p>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex w-full max-w-3xl flex-wrap justify-center gap-2">
+            {studioGoals.map((goal) => {
+              const Icon = goal.icon;
+              const isSelected = goal.id === selectedGoal.id;
+              return (
+                <button
+                  key={goal.id}
+                  type="button"
+                  onClick={() => setSelectedGoalId(goal.id)}
+                  className={`group relative flex min-h-[92px] w-[calc(50%-0.25rem)] flex-col items-center justify-center rounded-lg border px-3 py-3 text-center transition sm:w-[150px] ${
+                    isSelected
+                      ? "border-[#ffc400] bg-[#ffc400]/10 shadow-[0_0_0_1px_rgba(255,196,0,0.22)]"
+                      : "border-white/10 bg-[#101620]/80 hover:border-white/25 hover:bg-[#151d2a]"
+                  }`}
+                >
+                  {goal.recommended && (
+                    <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-emerald-400/12 text-emerald-300" title="Recommended">
+                      <Star className="h-3 w-3 fill-emerald-300" />
+                    </span>
+                  )}
+                  <div className={`grid h-9 w-9 place-items-center rounded-md ${
+                    isSelected ? "bg-[#ffc400] text-black" : "bg-white/[0.06] text-[#ffc400]"
+                  }`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <h2 className="mt-2 max-w-[8.5rem] text-xs font-semibold leading-4 text-white">{goal.title}</h2>
+                </button>
+              );
+            })}
+          </div>
 
-            <aside className="flex min-h-[360px] flex-col justify-between rounded-lg border border-white/10 bg-[#101620] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <div>
-                <div className="mb-4 grid h-12 w-12 place-items-center rounded-md bg-[#ffc400] text-black">
-                  <SelectedIcon className="h-6 w-6" />
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-[#ffc400]">Selected goal</p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight">{selectedGoal.title}</h2>
-                <p className="mt-3 text-sm leading-6 text-slate-300">{selectedGoal.description}</p>
-                <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Setup guide</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">{selectedGoal.setupHint}</p>
-                </div>
-              </div>
-              <Button
-                onClick={() => onStart(selectedGoal)}
-                className="mt-6 h-11 w-full gap-2 bg-[#ffc400] font-semibold text-black hover:bg-[#ffd84a]"
-              >
-                Start with this
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </aside>
+          <div className="flex w-full max-w-sm flex-col items-center gap-3">
+            <p className="min-h-5 text-xs leading-5 text-slate-400">{selectedGoal.description}</p>
+            <Button
+              onClick={() => onStart(selectedGoal)}
+              className="h-11 w-full gap-2 bg-[#ffc400] font-semibold text-black hover:bg-[#ffd84a]"
+            >
+              Start with this
+              <ArrowRight className="h-4 w-4" />
+            </Button>
           </div>
         </section>
       </div>

@@ -30,6 +30,7 @@ import {
   Trash2,
   Eye,
   X,
+  Square,
   Sparkles,
   MessageSquare,
   Hash,
@@ -71,6 +72,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; p
   rendering: { label: "Rendering Video", color: "secondary", icon: Film, progress: 80 },
   done: { label: "Done", color: "default", icon: CheckCircle2, progress: 100 },
   failed: { label: "Failed", color: "destructive", icon: AlertCircle, progress: 0 },
+  stopped: { label: "Stopped", color: "outline", icon: Square, progress: 0 },
 };
 
 function AudioPlayer({ jobId, type, label }: { jobId: number; type: "raw" | "clean"; label: string }) {
@@ -282,7 +284,7 @@ export function JobsList() {
   });
 
   const hasActiveJobs = jobsQuery.data?.some(
-    (j) => !["done", "failed"].includes(j.status)
+    (j) => !["done", "failed", "stopped"].includes(j.status)
   );
 
   const downloadKey = (jobId: number, type: "final" | "raw" | "clean") => `${jobId}:${type}`;
@@ -396,6 +398,20 @@ export function JobsList() {
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const stopJobMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      const res = await apiRequest("POST", `/api/jobs/${jobId}/stop`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: "Job stopped", description: "The job will exit at the next processing checkpoint." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Stop failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -527,7 +543,7 @@ export function JobsList() {
       {jobsQuery.data.map((job) => {
         const config = STATUS_CONFIG[job.status] || STATUS_CONFIG.queued;
         const StatusIcon = config.icon;
-        const isActive = !["done", "failed"].includes(job.status);
+        const isActive = !["done", "failed", "stopped"].includes(job.status);
         const isExpanded = expandedJobs.has(job.id);
         const hasContent = job.scriptText || job.headlineText || job.captionText || job.seoText || job.audioRawKey || job.audioCleanKey || job.logs;
         const finalDownloadState = downloadStates[downloadKey(job.id, "final")];
@@ -587,6 +603,19 @@ export function JobsList() {
                       data-testid={`button-expand-${job.id}`}
                     >
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </Button>
+                  )}
+                  {isActive && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => stopJobMutation.mutate(job.id)}
+                      disabled={stopJobMutation.isPending}
+                      data-testid={`button-stop-job-${job.id}`}
+                      className="gap-1.5 text-destructive hover:text-destructive"
+                    >
+                      {stopJobMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+                      Stop
                     </Button>
                   )}
                   <Button

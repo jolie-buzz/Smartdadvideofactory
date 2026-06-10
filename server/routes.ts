@@ -64,6 +64,9 @@ const ADMIN_MUSIC_LIBRARY_PROMPT = "__ADMIN_MUSIC_LIBRARY__";
 const ADMIN_GENERAL_PROMPTS_NAME = "__ADMIN_GENERAL_PROMPTS__";
 const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] || "" : value || "";
 const routeParamInt = (value: string | string[] | undefined) => parseInt(routeParam(value), 10);
+const canAccessUserOwnedRecord = (user: Express.User, ownerId?: number | null) => (
+  user.role === "admin" || ownerId === user.id
+);
 
 const pipeR2Media = async (
   res: Response,
@@ -1290,6 +1293,26 @@ export async function registerRoutes(
       const job = await storage.getJob(routeParamInt(req.params.id));
       if (!job) return res.status(404).json({ error: "Job not found" });
       res.json(job);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/jobs/:id/stop", requireAuth, async (req, res) => {
+    try {
+      const job = await storage.getJob(routeParamInt(req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      if (!canAccessUserOwnedRecord(req.user!, job.userId)) return res.status(403).json({ error: "Forbidden" });
+      if (["done", "failed", "stopped"].includes(job.status)) {
+        return res.status(400).json({ error: `Job is already ${job.status}` });
+      }
+
+      const stopped = await storage.updateJob(job.id, {
+        status: "stopped",
+        lastError: "Stopped by user",
+      });
+      await storage.appendJobLog(job.id, "Job stopped by user.");
+      res.json(stopped);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

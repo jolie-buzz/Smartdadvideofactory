@@ -46,6 +46,18 @@ function getLlmClient(): OpenAI {
   return llmClient;
 }
 
+class JobStoppedError extends Error {
+  constructor() {
+    super("Job stopped by user");
+    this.name = "JobStoppedError";
+  }
+}
+
+async function assertJobNotStopped(jobId: number): Promise<void> {
+  const current = await storage.getJob(jobId);
+  if (current?.status === "stopped") throw new JobStoppedError();
+}
+
 const transcriptionClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : process.env.AI_INTEGRATIONS_OPENAI_API_KEY
@@ -458,6 +470,7 @@ async function processJob(jobId: number): Promise<void> {
 
   try {
     // ── Video Builder: auto-generate variant if needed ──────────────────────
+    await assertJobNotStopped(jobId);
     if (asset.videoSource === "builder") {
       await storage.updateJob(jobId, { status: "building_video" });
       await storage.appendJobLog(jobId, job.activateShuffle
@@ -470,6 +483,7 @@ async function processJob(jobId: number): Promise<void> {
         try {
           await storage.appendJobLog(jobId, "Studio timeline found. Rendering saved edits before AI pipeline...");
           const timelineVideoKey = await renderTimelineVideo(asset.id, timelineJson);
+          await assertJobNotStopped(jobId);
           await storage.updateAsset(asset.id, { videoKey: timelineVideoKey });
           const updatedAsset = await storage.getAsset(asset.id);
           if (updatedAsset) Object.assign(asset, updatedAsset);
@@ -609,6 +623,7 @@ async function processJob(jobId: number): Promise<void> {
 
       await storage.appendJobLog(jobId, `Variant #${variant.id} created with ${clipIds.length} clips. Rendering...`);
       await renderVariant(variant.id);
+      await assertJobNotStopped(jobId);
 
       const renderedVariant = await storage.getVariant(variant.id);
       if (!renderedVariant?.r2Key) {
@@ -625,6 +640,7 @@ async function processJob(jobId: number): Promise<void> {
     }
 
     // ── Step 1: Generate script ──────────────────────────────────────────────
+    await assertJobNotStopped(jobId);
     await storage.updateJob(jobId, { status: "generating_script" });
     await storage.appendJobLog(jobId, `Generating script with OpenAI (model: ${asset.openaiModel})...`);
 
@@ -660,6 +676,7 @@ async function processJob(jobId: number): Promise<void> {
     }
 
     const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords, videoAnalysisSummary));
+    await assertJobNotStopped(jobId);
     if (!scriptText) throw new Error("Generated script was empty after removing non-narration sections");
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);
@@ -667,6 +684,7 @@ async function processJob(jobId: number): Promise<void> {
     if (!asset.voiceId) throw new Error("No voice selected for this asset setup");
 
     // ── Step 2: Parallel — voice generation + presigned URLs ────────────────
+    await assertJobNotStopped(jobId);
     await storage.updateJob(jobId, { status: "generating_audio" });
     await storage.appendJobLog(jobId, `Generating voice (ElevenLabs) + fetching R2 URLs in parallel...`);
 
@@ -684,6 +702,7 @@ async function processJob(jobId: number): Promise<void> {
     }
 
     const [videoUrl, musicUrl] = await Promise.all([videoUrlPromise, musicUrlPromise]);
+    await assertJobNotStopped(jobId);
 
     await storage.appendJobLog(jobId, shouldMixVoice
       ? `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`
@@ -695,6 +714,7 @@ async function processJob(jobId: number): Promise<void> {
     const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
 
     // ── Step 3: Parallel — upload raw audio + run combined FFmpeg pass ───────
+    await assertJobNotStopped(jobId);
     await storage.updateJob(jobId, { status: "rendering" });
     await storage.appendJobLog(jobId, `Running combined FFmpeg pass (silenceremove + mix) + uploading raw audio in parallel...`);
 
@@ -731,6 +751,7 @@ async function processJob(jobId: number): Promise<void> {
       uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
       renderFinalVideo(),
     ]);
+    await assertJobNotStopped(jobId);
     logMemory("worker: after raw audio upload/render", { jobId });
 
     await storage.updateJob(jobId, { audioRawKey });
@@ -739,12 +760,15 @@ async function processJob(jobId: number): Promise<void> {
     // ── Step 4: Auto-captions (optional) ────────────────────────────────────
     let outputPath = finalPath;
     if (asset.autoCaptions) {
+      await assertJobNotStopped(jobId);
       await storage.appendJobLog(jobId, "Generating captions via AI transcription...");
       try {
         const srtContent = await transcribeAudio(audioRawBuffer, workDir);
+        await assertJobNotStopped(jobId);
         await storage.appendJobLog(jobId, "Burning captions into video...");
         const captionedPath = join(workDir, "final_captioned.mp4");
         await burnCaptionsToFile(finalPath, srtContent, captionedPath, workDir);
+        await assertJobNotStopped(jobId);
         outputPath = captionedPath;
         await storage.appendJobLog(jobId, "Captions added successfully");
       } catch (err: any) {
@@ -753,6 +777,7 @@ async function processJob(jobId: number): Promise<void> {
     }
 
     // ── Step 5: Parallel AI text outputs ────────────────────────────────────
+    await assertJobNotStopped(jobId);
     const textTasks: Promise<void>[] = [];
     const adminPrompts = await storage.getAdminGeneralPrompts();
 
@@ -765,6 +790,7 @@ async function processJob(jobId: number): Promise<void> {
             photoUrl,
             asset.hookModel || asset.openaiModel,
           );
+          await assertJobNotStopped(jobId);
           await storage.updateJob(jobId, { headlineText: headline });
           await storage.appendJobLog(jobId, `Hook headline: "${headline}"`);
         } catch (err: any) {
@@ -782,6 +808,7 @@ async function processJob(jobId: number): Promise<void> {
             photoUrl,
             asset.captionModel || asset.openaiModel,
           );
+          await assertJobNotStopped(jobId);
           await storage.updateJob(jobId, { captionText: caption });
           await storage.appendJobLog(jobId, "Caption generated");
         } catch (err: any) {
@@ -799,6 +826,7 @@ async function processJob(jobId: number): Promise<void> {
             photoUrl,
             asset.seoModel || asset.openaiModel,
           );
+          await assertJobNotStopped(jobId);
           await storage.updateJob(jobId, { seoText: seo });
           await storage.appendJobLog(jobId, "SEO keywords generated");
         } catch (err: any) {
@@ -810,19 +838,27 @@ async function processJob(jobId: number): Promise<void> {
     if (textTasks.length > 0) {
       await storage.appendJobLog(jobId, `Running ${textTasks.length} AI text task(s) in parallel...`);
       await Promise.all(textTasks);
+      await assertJobNotStopped(jobId);
     }
 
     // ── Step 6: Upload final video ───────────────────────────────────────────
+    await assertJobNotStopped(jobId);
     await storage.appendJobLog(jobId, "Uploading final video to R2...");
     const finalVideoKey = `jobs/${jobId}/final.mp4`;
     logMemory("worker: before final upload", { jobId, key: finalVideoKey });
     await uploadFileToR2(finalVideoKey, outputPath, "video/mp4");
+    await assertJobNotStopped(jobId);
     logMemory("worker: after final upload", { jobId, key: finalVideoKey });
     const finalStats = await stat(outputPath);
     await storage.updateJob(jobId, { finalVideoKey, status: "done", lastError: null });
     await storage.appendJobLog(jobId, `Done! Final video uploaded (${(finalStats.size / 1024 / 1024).toFixed(2)} MB).`);
 
   } catch (err: any) {
+    if (err instanceof JobStoppedError) {
+      await storage.updateJob(jobId, { status: "stopped", lastError: "Stopped by user" });
+      await storage.appendJobLog(jobId, "Stopped before the next pipeline step.");
+      return;
+    }
     console.error(`Job ${jobId} failed:`, err);
     await storage.updateJob(jobId, { status: "failed", lastError: err.message || String(err) });
     await storage.appendJobLog(jobId, `FAILED: ${err.message || String(err)}`);
@@ -833,7 +869,7 @@ async function processJob(jobId: number): Promise<void> {
   });
 }
 
-const TERMINAL_STATUSES = ["queued", "done", "failed"];
+const TERMINAL_STATUSES = ["queued", "done", "failed", "stopped"];
 
 async function recoverStuckJobs(): Promise<void> {
   try {

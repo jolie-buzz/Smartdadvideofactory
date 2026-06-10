@@ -2515,7 +2515,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             isProductionRail ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_320px]"
           }`}>
             {isProductionRail ? (
-              <section className="min-h-0 overflow-y-auto p-4 max-md:p-3">
+              <section className="min-h-0 overflow-y-auto overflow-x-hidden p-4 max-md:p-0 max-md:pt-[env(safe-area-inset-top)]">
                 <StudioWorkflowPanel
                   activeRail={activeRail}
                   editingAsset={editingAsset}
@@ -3186,22 +3186,22 @@ function StudioWorkflowPanel({
     : titles.setup;
 
   return (
-    <div className="dark mx-auto flex min-h-full w-full max-w-6xl flex-col rounded-xl border border-white/10 bg-background text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.28)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <div>
+    <div className="dark mx-auto flex min-h-full w-full min-w-0 max-w-6xl flex-col overflow-hidden rounded-xl border border-white/10 bg-background text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:max-w-none max-md:rounded-none max-md:border-x-0 max-md:border-t-0">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-4 max-md:px-4 max-md:py-3">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-primary">Buzzly Studio</p>
-          <h2 className="text-xl font-semibold tracking-tight">{current.title}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{current.description}</p>
+          <h2 className="truncate text-xl font-semibold tracking-tight">{current.title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-md:[display:-webkit-box] max-md:[-webkit-box-orient:vertical] max-md:[-webkit-line-clamp:2] max-md:overflow-hidden md:truncate">{current.description}</p>
         </div>
         {activeRail !== "setup" && (
-          <Button onClick={onCreateSetup} className="gap-2">
+          <Button onClick={onCreateSetup} className="shrink-0 gap-2 max-sm:w-full">
             <Settings className="h-4 w-4" />
             New Setup
           </Button>
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-6 max-md:px-3 max-md:py-4">
         {activeRail === "setup" && goal && setupMode === "guided" && !editingAsset && (
           <GuidedSetupWizard
             goal={goal}

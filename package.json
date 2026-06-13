@@ -8,7 +8,10 @@
   },
   "scripts": {
     "dev": "PORT=5174 NODE_ENV=development tsx server/index.ts",
+    "build:web": "vite build",
     "build": "npm run db:push && tsx script/build.ts",
+    "ios:sync": "npm run build:web && cap sync ios",
+    "ios:open": "cap open ios",
     "start": "NODE_ENV=production node --enable-source-maps dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
@@ -18,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.995.0",
     "@aws-sdk/lib-storage": "^3.995.0",
     "@aws-sdk/s3-request-presigner": "^3.995.0",
+    "@capacitor/core": "^7.6.6",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@radix-ui/react-accordion": "^1.2.4",
@@ -92,6 +96,8 @@
     "zod-validation-error": "^3.5.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.6",
+    "@capacitor/ios": "^7.6.6",
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",

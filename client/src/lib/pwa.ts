@@ -1,3 +1,9 @@
+import { Capacitor } from "@capacitor/core";
+
+export function isNativeApp() {
+  return Capacitor.isNativePlatform();
+}
+
 export function isPwaStandalone() {
   return (
     window.matchMedia?.("(display-mode: standalone)").matches
@@ -13,7 +19,7 @@ export function isIosSafari() {
 }
 
 export function registerServiceWorker() {
-  if (!("serviceWorker" in navigator) || import.meta.env.DEV) return;
+  if (isNativeApp() || !("serviceWorker" in navigator) || import.meta.env.DEV) return;
 
   window.addEventListener("load", () => {
     let refreshing = false;

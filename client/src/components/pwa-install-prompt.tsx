@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Share, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { isIosSafari, isPwaStandalone } from "@/lib/pwa";
+import { isIosSafari, isNativeApp, isPwaStandalone } from "@/lib/pwa";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -14,6 +14,7 @@ export function PwaInstallPrompt() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === "true");
   const [standalone, setStandalone] = useState(false);
+  const nativeApp = useMemo(() => (typeof window === "undefined" ? false : isNativeApp()), []);
   const iosSafari = useMemo(() => (typeof window === "undefined" ? false : isIosSafari()), []);
 
   useEffect(() => {
@@ -38,7 +39,7 @@ export function PwaInstallPrompt() {
     };
   }, []);
 
-  if (dismissed || standalone || (!installEvent && !iosSafari)) return null;
+  if (nativeApp || dismissed || standalone || (!installEvent && !iosSafari)) return null;
 
   const dismiss = () => {
     localStorage.setItem(DISMISSED_KEY, "true");

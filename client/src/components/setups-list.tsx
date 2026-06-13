@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star, Download, Music } from "lucide-react";
-import { useState } from "react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star, Download, Music, Search, LayoutGrid, List, Clock, Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { Asset } from "@shared/schema";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 
@@ -30,6 +31,15 @@ type MusicLibraryTrack = {
   musicKey: string;
   musicUrl: string | null;
 };
+
+type JobSummary = {
+  id: number;
+  assetId: number;
+  createdAt: string;
+};
+
+type SetupSortMode = "recent" | "newest" | "favorite" | "name";
+type SetupViewMode = "list" | "grid";
 
 interface SetupsListProps {
   onActivate: () => void;
@@ -97,9 +107,15 @@ const isMusicLibraryAsset = (asset: Asset) => (
 export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps) {
   const { toast } = useToast();
   const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortMode, setSortMode] = useState<SetupSortMode>("recent");
+  const [viewMode, setViewMode] = useState<SetupViewMode>("list");
 
   const assetsQuery = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
+  });
+  const jobsQuery = useQuery<JobSummary[]>({
+    queryKey: ["/api/jobs"],
   });
   const mediaUrlsQuery = useQuery<Record<number, AssetMediaUrls>>({
     queryKey: ["/api/assets/media-urls"],
@@ -112,8 +128,49 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     queryKey: ["/api/music-library"],
   });
 
-  const visibleAssets = (assetsQuery.data || []).filter((asset) => !isMusicLibraryAsset(asset));
-  const sortedAssets = [...visibleAssets].sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite));
+  const lastUsedByAssetId = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const job of jobsQuery.data || []) {
+      if (!map.has(job.assetId)) map.set(job.assetId, job.createdAt);
+    }
+    return map;
+  }, [jobsQuery.data]);
+
+  const visibleAssets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return (assetsQuery.data || []).filter((asset) => {
+      if (isMusicLibraryAsset(asset)) return false;
+      if (!query) return true;
+      return [
+        asset.name,
+        asset.personaPrompt,
+        asset.voiceName || "",
+        asset.openaiModel || "",
+      ].some((value) => value.toLowerCase().includes(query));
+    });
+  }, [assetsQuery.data, searchQuery]);
+
+  const sortedAssets = useMemo(() => {
+    const timeValue = (value?: string | Date | null) => value ? new Date(value).getTime() || 0 : 0;
+    return [...visibleAssets].sort((a, b) => {
+      const favoriteDiff = Number(b.isFavorite) - Number(a.isFavorite);
+      if (sortMode === "favorite" && favoriteDiff) return favoriteDiff;
+      if (sortMode === "recent") {
+        const recentDiff = timeValue(lastUsedByAssetId.get(b.id)) - timeValue(lastUsedByAssetId.get(a.id));
+        if (recentDiff) return recentDiff;
+      }
+      if (sortMode === "newest") {
+        const newestDiff = timeValue(b.createdAt) - timeValue(a.createdAt);
+        if (newestDiff) return newestDiff;
+      }
+      if (sortMode === "name") {
+        const nameDiff = a.name.localeCompare(b.name);
+        if (nameDiff) return nameDiff;
+      }
+      return favoriteDiff || timeValue(b.createdAt) - timeValue(a.createdAt);
+    });
+  }, [lastUsedByAssetId, sortMode, visibleAssets]);
+
   const selectedCount = selectedAssetIds.length;
 
   const activateMutation = useMutation({
@@ -224,7 +281,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     ));
   };
 
-  const allSelected = sortedAssets.length > 0 && selectedAssetIds.length === sortedAssets.length;
+  const allSelected = sortedAssets.length > 0 && sortedAssets.every((asset) => selectedAssetIds.includes(asset.id));
   const musicOptions = [
     ...FREE_MUSIC_LIBRARY.map((track) => ({
       key: `public:${track.uri}`,
@@ -274,66 +331,134 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-hidden">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">Saved Setups</h2>
-        <Badge variant="secondary">{visibleAssets.length} setup{visibleAssets.length !== 1 ? "s" : ""}</Badge>
+        <Badge variant="secondary">{sortedAssets.length} setup{sortedAssets.length !== 1 ? "s" : ""}</Badge>
       </div>
 
       <Card className="overflow-hidden">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3 max-sm:items-stretch">
-          <label className="flex items-center gap-2 text-sm max-sm:w-full">
-            <Checkbox
-              checked={allSelected}
-              onCheckedChange={(value) => setSelectedAssetIds(value ? sortedAssets.map((asset) => asset.id) : [])}
-              data-testid="checkbox-select-all-setups"
-            />
-            Select all
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-2 max-sm:grid max-sm:w-full max-sm:grid-cols-2">
-            <Badge variant="outline" className="max-sm:col-span-2 max-sm:w-fit">{selectedCount} selected</Badge>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={selectedCount === 0 || bulkActivateMutation.isPending}
-              onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: false })}
-              data-testid="button-bulk-activate"
-              className="max-sm:w-full max-sm:min-w-0"
-            >
-              {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
-              Activate Selected
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={selectedCount === 0 || bulkActivateMutation.isPending}
-              onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: true })}
-              data-testid="button-bulk-activate-shuffle"
-              className="max-sm:w-full max-sm:min-w-0"
-            >
-              {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
-              Shuffle Selected
-            </Button>
+        <CardContent className="space-y-3 p-3">
+          <div className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search setups..."
+                className="h-10 pl-9"
+                data-testid="input-search-setups"
+              />
+            </div>
+            <Select value={sortMode} onValueChange={(value) => setSortMode(value as SetupSortMode)}>
+              <SelectTrigger className="h-10" data-testid="select-setup-sort">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recent">Recent use</SelectItem>
+                <SelectItem value="newest">Newly added</SelectItem>
+                <SelectItem value="favorite">Favorites first</SelectItem>
+                <SelectItem value="name">Name A-Z</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted/30 p-1">
+              <Button
+                type="button"
+                size="icon"
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                className="h-8 w-full"
+                onClick={() => setViewMode("list")}
+                title="List view"
+                data-testid="button-list-view"
+              >
+                <List className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant={viewMode === "grid" ? "secondary" : "ghost"}
+                className="h-8 w-full"
+                onClick={() => setViewMode("grid")}
+                title="Grid view"
+                data-testid="button-grid-view"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 max-sm:items-stretch">
+            <label className="flex items-center gap-2 text-sm max-sm:w-full">
+              <Checkbox
+                checked={allSelected}
+                onCheckedChange={(value) => {
+                  const visibleIds = sortedAssets.map((asset) => asset.id);
+                  setSelectedAssetIds((current) => (
+                    value
+                      ? Array.from(new Set([...current, ...visibleIds]))
+                      : current.filter((id) => !visibleIds.includes(id))
+                  ));
+                }}
+                data-testid="checkbox-select-all-setups"
+              />
+              Select shown
+            </label>
+            <div className="flex min-w-0 flex-wrap items-center gap-2 max-sm:grid max-sm:w-full max-sm:grid-cols-2">
+              <Badge variant="outline" className="max-sm:col-span-2 max-sm:w-fit">{selectedCount} selected</Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={selectedCount === 0 || bulkActivateMutation.isPending}
+                onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: false })}
+                data-testid="button-bulk-activate"
+                className="max-sm:w-full max-sm:min-w-0"
+              >
+                {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
+                Activate Selected
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={selectedCount === 0 || bulkActivateMutation.isPending}
+                onClick={() => bulkActivateMutation.mutate({ assetIds: selectedAssetIds, shuffle: true })}
+                data-testid="button-bulk-activate-shuffle"
+                className="max-sm:w-full max-sm:min-w-0"
+              >
+                {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
+                Shuffle Selected
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
 
+      {sortedAssets.length === 0 && (
+        <Card>
+          <CardContent className="py-10 text-center">
+            <Search className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">No setup matches your search.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className={viewMode === "grid" ? "grid gap-3 md:grid-cols-2" : "space-y-3"}>
       {sortedAssets.map((asset, index) => {
         const media = mediaUrlsQuery.data?.[asset.id];
         const isRecovered = asset.name.startsWith("Recovered Asset ");
         const selectedMusicLabel = musicOptions.find((option) => option.key === asset.musicKey)?.label;
+        const lastUsedAt = lastUsedByAssetId.get(asset.id);
         return (
         <Card key={asset.id} className="overflow-hidden">
           <CardContent className="p-3">
-            <div className="flex min-w-0 items-start gap-3 max-sm:flex-col">
+            <div className={`flex min-w-0 items-start gap-3 max-sm:flex-col ${viewMode === "grid" ? "md:flex-col" : ""}`}>
               <Checkbox
                 checked={selectedAssetIds.includes(asset.id)}
                 onCheckedChange={(value) => toggleSelected(asset.id, Boolean(value))}
-                className="mt-7 shrink-0 max-sm:mt-1"
+                className={`shrink-0 max-sm:mt-1 ${viewMode === "grid" ? "mt-1" : "mt-7"}`}
                 aria-label={`Select ${asset.name}`}
                 data-testid={`checkbox-select-setup-${asset.id}`}
               />
               <button
                 type="button"
-                className="relative grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground max-sm:h-32 max-sm:w-full"
+                className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground max-sm:h-32 max-sm:w-full ${viewMode === "grid" ? "aspect-video h-auto w-full" : "h-20 w-20"}`}
                 onClick={() => onOpenStudio?.(asset, media)}
                 disabled={!onOpenStudio}
                 title="Open in Studio"
@@ -380,14 +505,14 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                     </p>
                   </div>
 
-                  <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start max-sm:grid max-sm:grid-cols-2">
+                  <div className={`flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start max-sm:grid max-sm:grid-cols-2 ${viewMode === "grid" ? "md:grid md:grid-cols-2 md:w-full" : ""}`}>
                     {onOpenStudio && (
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={() => onOpenStudio(asset, media)}
                         data-testid={`button-open-studio-${asset.id}`}
-                        className="h-8 max-sm:w-full max-sm:min-w-0"
+                        className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
                       >
                         <Clapperboard className="mr-1 h-4 w-4" />
                         Studio
@@ -399,7 +524,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: false })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-${asset.id}`}
-                      className="h-8 max-sm:w-full max-sm:min-w-0"
+                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
                     >
                       {activateMutation.isPending ? (
                         <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -413,7 +538,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: true })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-shuffle-${asset.id}`}
-                      className="h-8 max-sm:w-full max-sm:min-w-0"
+                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
                     >
                       {activateMutation.isPending ? (
                         <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -434,7 +559,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       }}
                       data-testid={`button-edit-${asset.id}`}
                       title="Edit setup"
-                      className="h-8 max-sm:w-full max-sm:min-w-0"
+                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
                     >
                       <Pencil className="h-4 w-4" />
                       <span className="ml-1">Edit</span>
@@ -446,7 +571,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={duplicateMutation.isPending}
                       data-testid={`button-duplicate-${asset.id}`}
                       title="Duplicate setup"
-                      className="h-8 w-8 max-sm:w-full"
+                      className="h-8 w-8 max-sm:w-full md:w-full"
                     >
                       {duplicateMutation.isPending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -461,7 +586,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={deleteMutation.isPending}
                       data-testid={`button-delete-${asset.id}`}
                       title="Delete setup"
-                      className="h-8 w-8 max-sm:w-full"
+                      className="h-8 w-8 max-sm:w-full md:w-full"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -543,6 +668,10 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   <span>
                     {new Date(asset.createdAt).toLocaleDateString()}
                   </span>
+                  <span className="flex items-center gap-1">
+                    {lastUsedAt ? <Clock className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
+                    {lastUsedAt ? `Used ${new Date(lastUsedAt).toLocaleDateString()}` : "Newly added"}
+                  </span>
                 </div>
 
                 {isRecovered && (
@@ -597,6 +726,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         </Card>
         );
       })}
+      </div>
     </div>
   );
 }

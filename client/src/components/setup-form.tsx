@@ -238,7 +238,7 @@ async function uploadStudioShot(file: File, assetId: number, index: number, cate
   };
 }
 
-type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "converting-music" | "saving" | "done";
+type UploadStep = "idle" | "uploading-photo" | "uploading-video" | "uploading-music" | "converting-music" | "saving" | "analyzing-video" | "done";
 
 interface SetupFormProps {
   onComplete: () => void;
@@ -662,7 +662,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     return savedShots;
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options: { analyzeVideo?: boolean } = {}) => {
     if (isEditing) {
       try {
         setUploadStep("saving");
@@ -792,9 +792,27 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         }
       }
 
+      if (options.analyzeVideo) {
+        setUploadStep("analyzing-video");
+        const analysisRes = await fetch(`/api/assets/${createdAsset.id}/video-analysis`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: true, model: videoAnalysisModel }),
+        });
+        if (!analysisRes.ok) {
+          const errData = await analysisRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Video analysis failed (${analysisRes.status})`);
+        }
+      }
+
       setUploadStep("done");
       invalidateAssetsCache();
-      toast({ title: "Setup saved", description: "Your setup has been saved successfully." });
+      toast({
+        title: options.analyzeVideo ? "Setup saved + video analyzed" : "Setup saved",
+        description: options.analyzeVideo
+          ? "Buzzly saved fresh visual intelligence for this setup."
+          : "Your setup has been saved successfully.",
+      });
       setName("");
       setPersonaPrompt("");
       setPhoto(null);
@@ -1002,6 +1020,8 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
     ? "Extracting audio from video..."
     : uploadStep === "saving"
     ? "Saving..."
+    : uploadStep === "analyzing-video"
+    ? "Analyzing video..."
     : "";
 
   const shotCounts: Record<string, number> = {};
@@ -1076,10 +1096,27 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                   <p className="text-xs text-muted-foreground">
                     Upload clips, trim, arrange, then tap Done edit. You can reopen this anytime.
                   </p>
-                  <Button type="button" className="h-11 w-full justify-center gap-2 sm:w-auto" onClick={onOpenVideoBuilder}>
-                    <Clapperboard className="h-4 w-4" />
-                    {studioVideoFiles.length > 0 ? "Edit in Studio" : "Open Studio Builder"}
-                  </Button>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button type="button" className="h-11 w-full justify-center gap-2" onClick={onOpenVideoBuilder}>
+                      <Clapperboard className="h-4 w-4" />
+                      {studioVideoFiles.length > 0 ? "Edit in Studio" : "Open Studio Builder"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 w-full justify-center gap-2"
+                      onClick={() => handleSave({ analyzeVideo: true })}
+                      disabled={!canSave || isUploading}
+                      data-testid="button-save-analyze-video"
+                    >
+                      {uploadStep === "analyzing-video" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Brain className="h-4 w-4" />
+                      )}
+                      Save + Analyze video
+                    </Button>
+                  </div>
                   {studioVideoFiles.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
@@ -1981,11 +2018,19 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
 
               <div className="flex items-center gap-2 text-sm">
                 {uploadStep === "saving" && <Loader2 className="w-3 h-3 animate-spin" />}
+                {uploadStep === "analyzing-video" && <CheckCircle2 className="w-3 h-3 text-green-500" />}
                 {(uploadStep === "uploading-photo" || uploadStep === "uploading-video" || uploadStep === "uploading-music") && <span className="w-3 h-3" />}
                 <span className={uploadStep === "saving" ? "font-medium" : "text-muted-foreground"}>
                   Save setup + shots
                 </span>
               </div>
+
+              {uploadStep === "analyzing-video" && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span className="font-medium">Analyze video</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -2005,7 +2050,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
             <Button
               className="flex-1"
               size="lg"
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={!canSave || isUploading}
               data-testid="button-save-setup"
             >

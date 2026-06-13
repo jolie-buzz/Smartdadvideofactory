@@ -445,20 +445,21 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         const isRecovered = asset.name.startsWith("Recovered Asset ");
         const selectedMusicLabel = musicOptions.find((option) => option.key === asset.musicKey)?.label;
         const lastUsedAt = lastUsedByAssetId.get(asset.id);
+        const isGridView = viewMode === "grid";
         return (
         <Card key={asset.id} className="overflow-hidden">
-          <CardContent className="p-3">
-            <div className={`flex min-w-0 items-start gap-3 max-sm:flex-col ${viewMode === "grid" ? "md:flex-col" : ""}`}>
+          <CardContent className={isGridView ? "p-3" : "p-2 sm:p-3"}>
+            <div className={`flex min-w-0 items-start gap-3 ${isGridView ? "max-sm:flex-col md:flex-col" : "max-sm:flex-row"}`}>
               <Checkbox
                 checked={selectedAssetIds.includes(asset.id)}
                 onCheckedChange={(value) => toggleSelected(asset.id, Boolean(value))}
-                className={`shrink-0 max-sm:mt-1 ${viewMode === "grid" ? "mt-1" : "mt-7"}`}
+                className={`shrink-0 ${isGridView ? "mt-1 max-sm:mt-1" : "mt-7 max-sm:mt-5"}`}
                 aria-label={`Select ${asset.name}`}
                 data-testid={`checkbox-select-setup-${asset.id}`}
               />
               <button
                 type="button"
-                className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground max-sm:h-32 max-sm:w-full ${viewMode === "grid" ? "aspect-video h-auto w-full" : "h-20 w-20"}`}
+                className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground ${isGridView ? "aspect-video h-auto w-full max-sm:h-32 max-sm:w-full" : "h-20 w-20 max-sm:h-16 max-sm:w-16"}`}
                 onClick={() => onOpenStudio?.(asset, media)}
                 disabled={!onOpenStudio}
                 title="Open in Studio"
@@ -470,18 +471,18 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </span>
                 )}
               </button>
-              <div className="w-full min-w-0 flex-1 space-y-2">
+              <div className={`w-full min-w-0 flex-1 ${isGridView ? "space-y-2" : "space-y-2 max-sm:space-y-1"}`}>
                 <div className="flex items-start justify-between gap-3 max-lg:flex-col">
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h3 className="min-w-0 truncate font-medium leading-5" data-testid={`text-asset-name-${asset.id}`}>
+                    <div className={`flex min-w-0 items-center gap-2 ${isGridView ? "flex-wrap" : "flex-nowrap"}`}>
+                      <h3 className={`min-w-0 truncate font-medium leading-5 ${isGridView ? "" : "max-sm:text-sm"}`} data-testid={`text-asset-name-${asset.id}`}>
                         {asset.name}
                       </h3>
                       <Button
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className={`h-7 w-7 shrink-0 ${asset.isFavorite ? "text-[#ffc400]" : "text-muted-foreground"}`}
+                        className={`h-7 w-7 shrink-0 ${asset.isFavorite ? "text-[#ffc400]" : "text-muted-foreground"} ${isGridView ? "" : "max-sm:h-6 max-sm:w-6"}`}
                         onClick={() => favoriteMutation.mutate({ id: asset.id, isFavorite: !asset.isFavorite })}
                         disabled={favoriteMutation.isPending}
                         title={asset.isFavorite ? "Remove favorite" : "Favorite setup"}
@@ -493,29 +494,29 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                         <Badge variant="outline" className="shrink-0 text-xs">Recovered</Badge>
                       )}
                       {asset.voiceName && (
-                        <Badge variant="secondary" className="min-w-0 max-w-[260px] truncate text-xs max-sm:max-w-full">
+                        <Badge variant="secondary" className={`min-w-0 max-w-[260px] truncate text-xs max-sm:max-w-full ${isGridView ? "" : "max-sm:max-w-[110px]"}`}>
                           <Mic className="mr-1 h-3 w-3 shrink-0" />
                           {asset.voiceName}
                         </Badge>
                       )}
                     </div>
 
-                    <p className="min-w-0 break-words text-sm text-muted-foreground sm:truncate max-sm:[display:-webkit-box] max-sm:[-webkit-box-orient:vertical] max-sm:[-webkit-line-clamp:2] max-sm:overflow-hidden">
+                    <p className={`min-w-0 break-words text-sm text-muted-foreground sm:truncate max-sm:[-webkit-box-orient:vertical] max-sm:[-webkit-line-clamp:2] max-sm:overflow-hidden ${isGridView ? "max-sm:[display:-webkit-box]" : "max-sm:hidden"}`}>
                       {asset.personaPrompt}
                     </p>
                   </div>
 
-                  <div className={`flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start max-sm:grid max-sm:grid-cols-2 ${viewMode === "grid" ? "md:grid md:grid-cols-2 md:w-full" : ""}`}>
+                  <div className={`flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 max-lg:w-full max-lg:justify-start ${isGridView ? "max-sm:grid max-sm:grid-cols-2 md:grid md:grid-cols-2 md:w-full" : "max-sm:flex-nowrap max-sm:gap-1 max-sm:overflow-x-auto"}`}>
                     {onOpenStudio && (
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={() => onOpenStudio(asset, media)}
                         data-testid={`button-open-studio-${asset.id}`}
-                        className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
+                        className={`h-8 max-sm:min-w-0 md:min-w-0 ${isGridView ? "max-sm:w-full" : "max-sm:w-8 max-sm:px-0"}`}
                       >
-                        <Clapperboard className="mr-1 h-4 w-4" />
-                        Studio
+                        <Clapperboard className={`h-4 w-4 ${isGridView ? "mr-1" : "sm:mr-1"}`} />
+                        <span className={isGridView ? "" : "max-sm:hidden"}>Studio</span>
                       </Button>
                     )}
                     <Button
@@ -524,28 +525,28 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: false })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-${asset.id}`}
-                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
+                      className={`h-8 max-sm:min-w-0 md:min-w-0 ${isGridView ? "max-sm:w-full" : "max-sm:w-8 max-sm:px-0"}`}
                     >
                       {activateMutation.isPending ? (
-                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        <Loader2 className={`h-4 w-4 animate-spin ${isGridView ? "mr-1" : "sm:mr-1"}`} />
                       ) : (
-                        <Zap className="mr-1 h-4 w-4" />
+                        <Zap className={`h-4 w-4 ${isGridView ? "mr-1" : "sm:mr-1"}`} />
                       )}
-                      Activate
+                      <span className={isGridView ? "" : "max-sm:hidden"}>Activate</span>
                     </Button>
                     <Button
                       size="sm"
                       onClick={() => activateMutation.mutate({ assetId: asset.id, shuffle: true })}
                       disabled={activateMutation.isPending}
                       data-testid={`button-activate-shuffle-${asset.id}`}
-                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
+                      className={`h-8 max-sm:min-w-0 md:min-w-0 ${isGridView ? "max-sm:w-full" : "max-sm:w-8 max-sm:px-0"}`}
                     >
                       {activateMutation.isPending ? (
-                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        <Loader2 className={`h-4 w-4 animate-spin ${isGridView ? "mr-1" : "sm:mr-1"}`} />
                       ) : (
-                        <Zap className="mr-1 h-4 w-4" />
+                        <Zap className={`h-4 w-4 ${isGridView ? "mr-1" : "sm:mr-1"}`} />
                       )}
-                      Activate<span className="max-sm:hidden"> with Shuffle</span>
+                      <span className={isGridView ? "" : "max-sm:hidden"}>Activate<span className="max-sm:hidden"> with Shuffle</span></span>
                     </Button>
                     <Button
                       size="sm"
@@ -559,10 +560,10 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       }}
                       data-testid={`button-edit-${asset.id}`}
                       title="Edit setup"
-                      className="h-8 max-sm:w-full max-sm:min-w-0 md:min-w-0"
+                      className={`h-8 max-sm:min-w-0 md:min-w-0 ${isGridView ? "max-sm:w-full" : "max-sm:w-8 max-sm:px-0"}`}
                     >
                       <Pencil className="h-4 w-4" />
-                      <span className="ml-1">Edit</span>
+                      <span className={`ml-1 ${isGridView ? "" : "max-sm:hidden"}`}>Edit</span>
                     </Button>
                     <Button
                       size="icon"
@@ -571,7 +572,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={duplicateMutation.isPending}
                       data-testid={`button-duplicate-${asset.id}`}
                       title="Duplicate setup"
-                      className="h-8 w-8 max-sm:w-full md:w-full"
+                      className={`h-8 w-8 ${isGridView ? "max-sm:w-full md:w-full" : "max-sm:w-8"}`}
                     >
                       {duplicateMutation.isPending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -586,14 +587,14 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                       disabled={deleteMutation.isPending}
                       data-testid={`button-delete-${asset.id}`}
                       title="Delete setup"
-                      className="h-8 w-8 max-sm:w-full md:w-full"
+                      className={`h-8 w-8 ${isGridView ? "max-sm:w-full md:w-full" : "max-sm:w-8"}`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
 
-                <div className="grid min-w-0 gap-2 md:grid-cols-2">
+                <div className={`grid min-w-0 gap-2 md:grid-cols-2 ${isGridView ? "" : "max-sm:hidden"}`}>
                   <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Voice</p>
                     <Select
@@ -650,7 +651,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </div>
                 </div>
 
-                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground ${isGridView ? "" : "max-sm:gap-x-2 max-sm:text-[11px]"}`}>
                   <span className="flex items-center gap-1">
                     <Image className="w-3 h-3" /> {asset.photoKey ? "Photo" : "No photo"}
                   </span>
@@ -661,11 +662,11 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                     <Brain className="w-3 h-3" />
                     {asset.openaiModel || "gpt-4o"}
                   </span>
-                  <span className="flex items-center gap-1">
+                  <span className={`flex items-center gap-1 ${isGridView ? "" : "max-sm:hidden"}`}>
                     <Settings className="w-3 h-3" />
                     {asset.thresholdDb}dB / {asset.ignoreDetectionsShorterThan}s
                   </span>
-                  <span>
+                  <span className={isGridView ? "" : "max-sm:hidden"}>
                     {new Date(asset.createdAt).toLocaleDateString()}
                   </span>
                   <span className="flex items-center gap-1">

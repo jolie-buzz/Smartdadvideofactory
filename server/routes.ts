@@ -964,9 +964,34 @@ export async function registerRoutes(
 
   app.delete("/api/assets/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteAsset(routeParamInt(req.params.id));
+      const asset = await storage.getAsset(routeParamInt(req.params.id));
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      if (!canAccessUserOwnedRecord(req.user!, asset.userId)) return res.status(403).json({ error: "Forbidden" });
+      await storage.deleteAsset(asset.id);
       res.status(204).send();
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/assets/bulk-delete", requireAuth, async (req, res) => {
+    try {
+      const assetIds = z.array(z.number().int().positive()).min(1).max(100).parse(req.body.assetIds);
+      let deleted = 0;
+      for (const assetId of Array.from(new Set(assetIds))) {
+        const asset = await storage.getAsset(assetId);
+        if (!asset) continue;
+        if (!canAccessUserOwnedRecord(req.user!, asset.userId)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        await storage.deleteAsset(asset.id);
+        deleted += 1;
+      }
+      res.json({ deleted });
+    } catch (err: any) {
+      if (err?.issues) {
+        return res.status(400).json({ error: err.issues[0]?.message || "Invalid bulk delete request" });
+      }
       res.status(500).json({ error: err.message });
     }
   });

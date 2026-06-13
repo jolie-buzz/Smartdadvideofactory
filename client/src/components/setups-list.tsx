@@ -256,10 +256,30 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     },
     onSuccess: () => {
       invalidateAssetsCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       toast({ title: "Deleted", description: "Setup has been removed." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (assetIds: number[]) => {
+      const res = await apiRequest("POST", "/api/assets/bulk-delete", { assetIds });
+      return res.json();
+    },
+    onSuccess: (result: { deleted: number }) => {
+      invalidateAssetsCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setSelectedAssetIds([]);
+      toast({
+        title: "Setups deleted",
+        description: `${result.deleted} setup${result.deleted === 1 ? "" : "s"} removed.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Bulk delete error", description: err.message, variant: "destructive" });
     },
   });
 
@@ -424,6 +444,21 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
               >
                 {bulkActivateMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}
                 Shuffle Selected
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={selectedCount === 0 || bulkDeleteMutation.isPending}
+                onClick={() => {
+                  if (!window.confirm(`Delete ${selectedCount} selected setup${selectedCount === 1 ? "" : "s"}? This cannot be undone.`)) return;
+                  bulkDeleteMutation.mutate(selectedAssetIds);
+                }}
+                data-testid="button-bulk-delete-setups"
+                className="max-sm:col-span-2 max-sm:w-full max-sm:min-w-0"
+              >
+                {bulkDeleteMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1 h-4 w-4" />}
+                Delete Selected
               </Button>
             </div>
           </div>

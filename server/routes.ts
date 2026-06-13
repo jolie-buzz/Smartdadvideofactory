@@ -475,7 +475,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", requireAuth, async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -485,6 +485,7 @@ export async function registerRoutes(
         photoKey,
         videoKey: videoKey || "",
         videoSource: "builder",
+        scriptPromptId: scriptPromptId ? parseInt(String(scriptPromptId)) : null,
         personaPrompt: personaPrompt || "",
         voiceId: voiceId || null,
         voiceName: voiceName || null,
@@ -722,10 +723,11 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
+      const { name, personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
+      if (scriptPromptId !== undefined) updateData.scriptPromptId = scriptPromptId ? parseInt(String(scriptPromptId)) : null;
       if (videoSource !== undefined) updateData.videoSource = "builder";
       if (videoKey !== undefined) updateData.videoKey = videoKey;
       if (isFavorite !== undefined) updateData.isFavorite = Boolean(isFavorite);
@@ -777,6 +779,7 @@ export async function registerRoutes(
         videoKey: asset.videoKey,
         videoSource: "builder",
         isFavorite: asset.isFavorite,
+        scriptPromptId: asset.scriptPromptId,
         personaPrompt: asset.personaPrompt,
         voiceId: asset.voiceId,
         voiceName: asset.voiceName,
@@ -2049,9 +2052,14 @@ export async function registerRoutes(
       const updates: Record<string, string> = {};
       if (name?.trim()) updates.name = name.trim();
       if (promptText?.trim()) updates.promptText = promptText.trim();
+      const existingPrompt = await storage.getScriptPrompt(id, req.user!.role === "admin" ? undefined : req.user!.id);
+      if (!existingPrompt) return res.status(404).json({ error: "Prompt not found" });
       const prompt = await storage.updateScriptPrompt(id, req.user!.role === "admin" ? undefined : req.user!.id, updates);
       if (!prompt) return res.status(404).json({ error: "Prompt not found" });
-      res.json(prompt);
+      const syncedAssets = updates.promptText
+        ? await storage.syncAssetsForScriptPrompt(prompt, existingPrompt.promptText, updates.promptText)
+        : 0;
+      res.json({ ...prompt, syncedAssets });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

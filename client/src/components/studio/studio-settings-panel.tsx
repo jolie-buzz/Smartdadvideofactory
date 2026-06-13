@@ -157,10 +157,16 @@ export function StudioSettingsPanel() {
       const res = await apiRequest("PATCH", `/api/script-prompts/${id}`, { name, promptText });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (prompt: ScriptPrompt & { syncedAssets?: number }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/script-prompts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       setEditingPromptId(null);
-      toast({ title: "Prompt updated" });
+      toast({
+        title: "Prompt updated",
+        description: prompt.syncedAssets
+          ? `${prompt.syncedAssets} activation setup${prompt.syncedAssets === 1 ? "" : "s"} updated automatically.`
+          : "Saved prompt updated.",
+      });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });

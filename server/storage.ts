@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { users, assets, jobs, shots, variants, scriptPrompts, videoAnalyses, type User, type InsertUser, type Asset, type InsertAsset, type Job, type Shot, type InsertShot, type Variant, type InsertVariant, type ScriptPrompt, type InsertScriptPrompt, type VideoAnalysis, type InsertVideoAnalysis } from "@shared/schema";
-import { eq, desc, inArray, and, asc } from "drizzle-orm";
+import { eq, desc, inArray, and, asc, or } from "drizzle-orm";
 
 export type AdminGeneralPrompts = {
   hookPrompt: string;
@@ -49,9 +49,11 @@ export interface IStorage {
   deleteVariant(id: number): Promise<void>;
   getRecentVariantClipIds(assetId: number, limit: number): Promise<number[]>;
   getScriptPrompts(userId?: number): Promise<ScriptPrompt[]>;
+  getScriptPrompt(id: number, userId?: number): Promise<ScriptPrompt | undefined>;
   createScriptPrompt(data: InsertScriptPrompt): Promise<ScriptPrompt>;
   updateScriptPrompt(id: number, userId: number | undefined, data: Partial<InsertScriptPrompt>): Promise<ScriptPrompt | undefined>;
   deleteScriptPrompt(id: number, userId?: number): Promise<void>;
+  syncAssetsForScriptPrompt(prompt: ScriptPrompt, oldPromptText: string | undefined, newPromptText: string): Promise<number>;
   getAdminGeneralPrompts(): Promise<AdminGeneralPrompts>;
   updateAdminGeneralPrompts(data: AdminGeneralPrompts): Promise<AdminGeneralPrompts>;
 }
@@ -286,6 +288,14 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(scriptPrompts).orderBy(asc(scriptPrompts.name));
   }
 
+  async getScriptPrompt(id: number, userId?: number): Promise<ScriptPrompt | undefined> {
+    const whereClause = userId === undefined
+      ? eq(scriptPrompts.id, id)
+      : and(eq(scriptPrompts.id, id), eq(scriptPrompts.userId, userId));
+    const [result] = await db.select().from(scriptPrompts).where(whereClause);
+    return result;
+  }
+
   async createScriptPrompt(data: InsertScriptPrompt): Promise<ScriptPrompt> {
     const [result] = await db.insert(scriptPrompts).values(data).returning();
     return result;
@@ -304,6 +314,22 @@ export class DatabaseStorage implements IStorage {
       ? eq(scriptPrompts.id, id)
       : and(eq(scriptPrompts.id, id), eq(scriptPrompts.userId, userId));
     await db.delete(scriptPrompts).where(whereClause);
+  }
+
+  async syncAssetsForScriptPrompt(prompt: ScriptPrompt, oldPromptText: string | undefined, newPromptText: string): Promise<number> {
+    if (!newPromptText.trim()) return 0;
+    const legacyMatch = oldPromptText?.trim()
+      ? and(eq(assets.userId, prompt.userId), eq(assets.personaPrompt, oldPromptText.trim()))
+      : undefined;
+    const whereClause = legacyMatch
+      ? or(eq(assets.scriptPromptId, prompt.id), legacyMatch)
+      : eq(assets.scriptPromptId, prompt.id);
+    const updated = await db
+      .update(assets)
+      .set({ personaPrompt: newPromptText.trim(), scriptPromptId: prompt.id })
+      .where(whereClause)
+      .returning({ id: assets.id });
+    return updated.length;
   }
 
   async getAdminGeneralPrompts(): Promise<AdminGeneralPrompts> {

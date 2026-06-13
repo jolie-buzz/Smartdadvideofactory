@@ -197,8 +197,11 @@ async function seedAdmin() {
     await db.execute(
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS excluded_words TEXT` as any
     );
+    await db.execute(
+      `ALTER TABLE assets ADD COLUMN IF NOT EXISTS script_prompt_id INTEGER` as any
+    );
   } catch (err) {
-    // column may already exist, ignore
+    // columns may already exist, ignore
   }
 
   try {

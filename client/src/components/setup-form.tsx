@@ -258,6 +258,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [name, setName] = useState("");
   const [videoSource, setVideoSource] = useState<"builder">("builder");
   const [personaPrompt, setPersonaPrompt] = useState("");
+  const [scriptPromptId, setScriptPromptId] = useState<number | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
   const [voiceId, setVoiceId] = useState("");
@@ -365,6 +366,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setName(editingAsset.name);
       setVideoSource("builder");
       setPersonaPrompt(editingAsset.personaPrompt);
+      setScriptPromptId(editingAsset.scriptPromptId || null);
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
       setOpenaiModel(editingAsset.openaiModel || "gpt-4.1");
@@ -670,7 +672,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+            name, videoSource: "builder", personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
@@ -762,6 +764,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, photoKey: photoResult.key, videoKey: "",
+          scriptPromptId,
           videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
@@ -815,6 +818,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       });
       setName("");
       setPersonaPrompt("");
+      setScriptPromptId(null);
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -1445,6 +1449,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                   const chosen = scriptPromptsQuery.data?.find((p) => String(p.id) === val);
                   if (chosen) {
                     setPersonaPrompt(chosen.promptText);
+                    setScriptPromptId(chosen.id);
                     setLibraryPickerKey((k) => k + 1);
                   }
                 }}
@@ -1471,7 +1476,10 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               data-testid="input-persona-prompt"
               placeholder="Describe the product, target audience, and tone. Example: 'This is a rechargeable LED desk lamp perfect for students. Highlight the 3 brightness levels, USB-C charging, and 40-hour battery life. Tone: enthusiastic Buzzly reviewing tech products for families.'"
               value={personaPrompt}
-              onChange={(e) => setPersonaPrompt(e.target.value)}
+              onChange={(e) => {
+                setPersonaPrompt(e.target.value);
+                setScriptPromptId(null);
+              }}
               rows={5}
               disabled={isUploading}
             />

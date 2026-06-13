@@ -28,6 +28,7 @@ export const assets = pgTable("assets", {
   videoKey: text("video_key").notNull(),
   videoSource: text("video_source").notNull().default("builder"),
   isFavorite: boolean("is_favorite").notNull().default(false),
+  scriptPromptId: integer("script_prompt_id").references(() => scriptPrompts.id),
   personaPrompt: text("persona_prompt").notNull(),
   voiceId: text("voice_id"),
   voiceName: text("voice_name"),

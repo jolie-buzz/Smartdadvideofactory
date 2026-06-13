@@ -10,6 +10,7 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("user"),
   status: text("status").notNull().default("pending"),
   excludedWords: text("excluded_words"),
+  scriptDurationSec: integer("script_duration_sec").notNull().default(60),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -30,6 +31,7 @@ export const assets = pgTable("assets", {
   isFavorite: boolean("is_favorite").notNull().default(false),
   scriptPromptId: integer("script_prompt_id").references(() => scriptPrompts.id),
   personaPrompt: text("persona_prompt").notNull(),
+  scriptDurationSec: integer("script_duration_sec").notNull().default(60),
   voiceId: text("voice_id"),
   voiceName: text("voice_name"),
   openaiModel: text("openai_model").notNull().default("gpt-4.1"),

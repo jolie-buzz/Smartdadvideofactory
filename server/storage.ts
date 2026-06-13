@@ -8,6 +8,14 @@ export type AdminGeneralPrompts = {
   seoPrompt: string;
 };
 
+export const SCRIPT_DURATION_OPTIONS = [15, 30, 45, 60, 90] as const;
+export const DEFAULT_SCRIPT_DURATION_SEC = 60;
+
+export function normalizeScriptDurationSec(value: unknown): number {
+  const parsed = typeof value === "number" ? value : parseInt(String(value || ""), 10);
+  return SCRIPT_DURATION_OPTIONS.includes(parsed as any) ? parsed : DEFAULT_SCRIPT_DURATION_SEC;
+}
+
 const ADMIN_GENERAL_PROMPTS_NAME = "__ADMIN_GENERAL_PROMPTS__";
 
 export interface IStorage {
@@ -19,6 +27,8 @@ export interface IStorage {
   deleteUser(id: number): Promise<void>;
   getExcludedWords(userId: number): Promise<string | null>;
   updateExcludedWords(userId: number, words: string): Promise<void>;
+  getScriptDurationSec(userId: number): Promise<number>;
+  updateSettings(userId: number, data: { excludedWords?: string; scriptDurationSec?: number }): Promise<void>;
   createAsset(asset: InsertAsset): Promise<Asset>;
   updateAsset(id: number, data: Partial<InsertAsset>): Promise<Asset | undefined>;
   getAssets(userId?: number): Promise<Asset[]>;
@@ -94,6 +104,18 @@ export class DatabaseStorage implements IStorage {
 
   async updateExcludedWords(userId: number, words: string): Promise<void> {
     await db.update(users).set({ excludedWords: words }).where(eq(users.id, userId));
+  }
+
+  async getScriptDurationSec(userId: number): Promise<number> {
+    const [result] = await db.select({ scriptDurationSec: users.scriptDurationSec }).from(users).where(eq(users.id, userId));
+    return normalizeScriptDurationSec(result?.scriptDurationSec);
+  }
+
+  async updateSettings(userId: number, data: { excludedWords?: string; scriptDurationSec?: number }): Promise<void> {
+    await db.update(users).set({
+      ...(data.excludedWords !== undefined ? { excludedWords: data.excludedWords } : {}),
+      ...(data.scriptDurationSec !== undefined ? { scriptDurationSec: normalizeScriptDurationSec(data.scriptDurationSec) } : {}),
+    }).where(eq(users.id, userId));
   }
 
   async createAsset(asset: InsertAsset): Promise<Asset> {

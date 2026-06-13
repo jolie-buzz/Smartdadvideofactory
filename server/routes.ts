@@ -1,6 +1,6 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { normalizeScriptDurationSec, storage } from "./storage";
 import { uploadToR2, uploadFileToR2, downloadFileFromR2, getSignedDownloadUrl, getSignedUploadUrl, configureR2Cors, getR2ObjectStream, getR2ConfigStatus } from "./r2";
 import { startWorker } from "./worker";
 import { renderVariant } from "./video-builder";
@@ -475,7 +475,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", requireAuth, async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -487,6 +487,7 @@ export async function registerRoutes(
         videoSource: "builder",
         scriptPromptId: scriptPromptId ? parseInt(String(scriptPromptId)) : null,
         personaPrompt: personaPrompt || "",
+        scriptDurationSec: normalizeScriptDurationSec(scriptDurationSec ?? await storage.getScriptDurationSec(req.user!.id)),
         voiceId: voiceId || null,
         voiceName: voiceName || null,
         openaiModel: openaiModel || "gpt-4o",
@@ -723,11 +724,12 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
+      const { name, personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
       if (scriptPromptId !== undefined) updateData.scriptPromptId = scriptPromptId ? parseInt(String(scriptPromptId)) : null;
+      if (scriptDurationSec !== undefined) updateData.scriptDurationSec = normalizeScriptDurationSec(scriptDurationSec);
       if (videoSource !== undefined) updateData.videoSource = "builder";
       if (videoKey !== undefined) updateData.videoKey = videoKey;
       if (isFavorite !== undefined) updateData.isFavorite = Boolean(isFavorite);
@@ -781,6 +783,7 @@ export async function registerRoutes(
         isFavorite: asset.isFavorite,
         scriptPromptId: asset.scriptPromptId,
         personaPrompt: asset.personaPrompt,
+        scriptDurationSec: normalizeScriptDurationSec(asset.scriptDurationSec),
         voiceId: asset.voiceId,
         voiceName: asset.voiceName,
         openaiModel: asset.openaiModel,
@@ -2077,7 +2080,8 @@ export async function registerRoutes(
   app.get("/api/settings", requireAuth, async (req, res) => {
     try {
       const excludedWords = await storage.getExcludedWords(req.user!.id);
-      res.json({ excludedWords });
+      const scriptDurationSec = await storage.getScriptDurationSec(req.user!.id);
+      res.json({ excludedWords, scriptDurationSec });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2085,8 +2089,11 @@ export async function registerRoutes(
 
   app.patch("/api/settings", requireAuth, async (req, res) => {
     try {
-      const { excludedWords } = req.body;
-      await storage.updateExcludedWords(req.user!.id, excludedWords ?? "");
+      const { excludedWords, scriptDurationSec } = req.body;
+      await storage.updateSettings(req.user!.id, {
+        excludedWords: excludedWords ?? "",
+        ...(scriptDurationSec !== undefined ? { scriptDurationSec: normalizeScriptDurationSec(scriptDurationSec) } : {}),
+      });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

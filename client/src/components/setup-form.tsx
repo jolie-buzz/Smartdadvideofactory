@@ -88,6 +88,10 @@ const OPENAI_MODELS = [
   { id: "gpt-4.1-nano", name: "GPT-4.1 Nano (fastest)" },
 ];
 
+const SCRIPT_DURATION_OPTIONS = [15, 30, 45, 60, 90] as const;
+const normalizeDuration = (value: unknown) => SCRIPT_DURATION_OPTIONS.includes(Number(value) as any) ? Number(value) : 60;
+const durationIndex = (value: number) => Math.max(0, SCRIPT_DURATION_OPTIONS.indexOf(normalizeDuration(value) as any));
+
 const CATEGORIES = ["HOOK", "PROBLEM", "SOLUTION", "HIGHLIGHT", "BODY", "CTA"] as const;
 const SHOT_TYPES = ["demo", "aesthetic", "feature", "top", "side", "pov", "closeup", "before_after"] as const;
 
@@ -259,6 +263,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [videoSource, setVideoSource] = useState<"builder">("builder");
   const [personaPrompt, setPersonaPrompt] = useState("");
   const [scriptPromptId, setScriptPromptId] = useState<number | null>(null);
+  const [scriptDurationSec, setScriptDurationSec] = useState(60);
   const [photo, setPhoto] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
   const [voiceId, setVoiceId] = useState("");
@@ -367,6 +372,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setVideoSource("builder");
       setPersonaPrompt(editingAsset.personaPrompt);
       setScriptPromptId(editingAsset.scriptPromptId || null);
+      setScriptDurationSec(normalizeDuration(editingAsset.scriptDurationSec));
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
       setOpenaiModel(editingAsset.openaiModel || "gpt-4.1");
@@ -417,6 +423,9 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const mediaUrlsQuery = useQuery<Record<number, AssetMediaUrls>>({
     queryKey: ["/api/assets/media-urls"],
   });
+  const settingsQuery = useQuery<{ excludedWords: string | null; scriptDurationSec: number }>({
+    queryKey: ["/api/settings"],
+  });
   const videoAnalysisQuery = useQuery<VideoAnalysisStatus>({
     queryKey: [`/api/assets/${editingAsset?.id}/video-analysis`],
     enabled: !!editingAsset,
@@ -466,6 +475,12 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setVideoAnalysisModel(videoAnalysisQuery.data.modelUsed);
     }
   }, [videoAnalysisQuery.data?.modelUsed]);
+
+  useEffect(() => {
+    if (!editingAsset && settingsQuery.data?.scriptDurationSec) {
+      setScriptDurationSec(normalizeDuration(settingsQuery.data.scriptDurationSec));
+    }
+  }, [editingAsset, settingsQuery.data?.scriptDurationSec]);
 
   useEffect(() => {
     return () => {
@@ -672,7 +687,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, videoSource: "builder", personaPrompt, scriptPromptId, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+            name, videoSource: "builder", personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
@@ -765,6 +780,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
         body: JSON.stringify({
           name, photoKey: photoResult.key, videoKey: "",
           scriptPromptId,
+          scriptDurationSec,
           videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
@@ -819,6 +835,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setName("");
       setPersonaPrompt("");
       setScriptPromptId(null);
+      setScriptDurationSec(normalizeDuration(settingsQuery.data?.scriptDurationSec));
       setPhoto(null);
       setVideo(null);
       setMusic(null);
@@ -1488,6 +1505,33 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 The product photo will be analyzed by AI along with this prompt to generate an accurate script.
               </p>
             )}
+          </div>
+
+          <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="setup-script-duration">Script duration</Label>
+                <p className="text-xs text-muted-foreground">Controls how long the generated voiceover script should be.</p>
+              </div>
+              <span className="rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
+                {scriptDurationSec}s
+              </span>
+            </div>
+            <Slider
+              id="setup-script-duration"
+              min={0}
+              max={SCRIPT_DURATION_OPTIONS.length - 1}
+              step={1}
+              value={[durationIndex(scriptDurationSec)]}
+              onValueChange={([index]) => setScriptDurationSec(SCRIPT_DURATION_OPTIONS[index] ?? 60)}
+              disabled={isUploading}
+              data-testid="slider-setup-script-duration"
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              {SCRIPT_DURATION_OPTIONS.map((duration) => (
+                <span key={duration}>{duration}s</span>
+              ))}
+            </div>
           </div>
 
           <Separator />

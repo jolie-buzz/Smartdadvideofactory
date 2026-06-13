@@ -11,8 +11,13 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import type { ScriptPrompt } from "@shared/schema";
+
+const SCRIPT_DURATION_OPTIONS = [15, 30, 45, 60, 90] as const;
+const normalizeDuration = (value: unknown) => SCRIPT_DURATION_OPTIONS.includes(Number(value) as any) ? Number(value) : 60;
+const durationIndex = (value: number) => Math.max(0, SCRIPT_DURATION_OPTIONS.indexOf(normalizeDuration(value) as any));
 
 type MusicLibraryTrack = {
   id: number;
@@ -72,6 +77,7 @@ export function StudioSettingsPanel() {
   const { user, logout } = useAuth();
   const { toast } = useToast();
   const [excludedWordsInput, setExcludedWordsInput] = useState("");
+  const [scriptDurationSec, setScriptDurationSec] = useState(60);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -89,7 +95,7 @@ export function StudioSettingsPanel() {
   const [adminPromptSeo, setAdminPromptSeo] = useState("");
   const adminMusicInputRef = useRef<HTMLInputElement>(null);
 
-  const settingsQuery = useQuery<{ excludedWords: string | null }>({
+  const settingsQuery = useQuery<{ excludedWords: string | null; scriptDurationSec: number }>({
     queryKey: ["/api/settings"],
   });
 
@@ -110,6 +116,7 @@ export function StudioSettingsPanel() {
   useEffect(() => {
     if (settingsQuery.data) {
       setExcludedWordsInput(settingsQuery.data.excludedWords ?? "");
+      setScriptDurationSec(normalizeDuration(settingsQuery.data.scriptDurationSec));
     }
   }, [settingsQuery.data]);
 
@@ -122,13 +129,13 @@ export function StudioSettingsPanel() {
   }, [adminPromptsQuery.data]);
 
   const saveSettingsMutation = useMutation({
-    mutationFn: async (data: { excludedWords: string }) => {
+    mutationFn: async (data: { excludedWords: string; scriptDurationSec: number }) => {
       const res = await apiRequest("PATCH", "/api/settings", data);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      toast({ title: "Settings saved", description: "Excluded words updated for future jobs." });
+      toast({ title: "Settings saved", description: "Default script duration and excluded words updated." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -416,10 +423,36 @@ export function StudioSettingsPanel() {
           <CardHeader>
             <CardTitle>Excluded Words</CardTitle>
             <CardDescription>
-              Words or phrases listed here will never appear in generated voiceover scripts.
+              Set your default script length and words that should never appear in generated voiceover scripts.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="script-duration-default">Default script duration</Label>
+                  <p className="text-xs text-muted-foreground">Used by new setups. You can still override per setup.</p>
+                </div>
+                <span className="rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
+                  {scriptDurationSec}s
+                </span>
+              </div>
+              <Slider
+                id="script-duration-default"
+                min={0}
+                max={SCRIPT_DURATION_OPTIONS.length - 1}
+                step={1}
+                value={[durationIndex(scriptDurationSec)]}
+                onValueChange={([index]) => setScriptDurationSec(SCRIPT_DURATION_OPTIONS[index] ?? 60)}
+                disabled={settingsQuery.isLoading || saveSettingsMutation.isPending}
+                data-testid="slider-default-script-duration"
+              />
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                {SCRIPT_DURATION_OPTIONS.map((duration) => (
+                  <span key={duration}>{duration}s</span>
+                ))}
+              </div>
+            </div>
             <Textarea
               data-testid="input-excluded-words"
               placeholder={"e.g.\nsuper, amazing, revolutionary\ngame-changer\nunbelievable"}
@@ -430,7 +463,7 @@ export function StudioSettingsPanel() {
             />
             <Button
               data-testid="button-save-settings"
-              onClick={() => saveSettingsMutation.mutate({ excludedWords: excludedWordsInput })}
+              onClick={() => saveSettingsMutation.mutate({ excludedWords: excludedWordsInput, scriptDurationSec })}
               disabled={saveSettingsMutation.isPending || settingsQuery.isLoading}
             >
               {saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}

@@ -1,4 +1,4 @@
-import { storage } from "./storage";
+import { normalizeScriptDurationSec, storage } from "./storage";
 import { uploadToR2, uploadFileToR2, downloadFileFromR2, getSignedDownloadUrl } from "./r2";
 import { renderVariant } from "./video-builder";
 import { renderTimelineVideo } from "./timeline-renderer";
@@ -112,19 +112,33 @@ function appendAdminPrompt(setupPrompt: string | null, adminPrompt: string | nul
   return `${setup}\n\nAdmin global instruction:\n${admin}`;
 }
 
-async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, excludedWords?: string | null, videoAnalysisSummary?: string): Promise<string> {
+function getScriptDurationGuidance(durationSec: number) {
+  const normalized = normalizeScriptDurationSec(durationSec);
+  const guidance: Record<number, { words: string; lines: string; maxWordsPerLine: number }> = {
+    15: { words: "25-35", lines: "3-4", maxWordsPerLine: 9 },
+    30: { words: "55-70", lines: "4-5", maxWordsPerLine: 10 },
+    45: { words: "80-100", lines: "6-8", maxWordsPerLine: 12 },
+    60: { words: "110-130", lines: "8-10", maxWordsPerLine: 12 },
+    90: { words: "155-185", lines: "10-14", maxWordsPerLine: 13 },
+  };
+  return { durationSec: normalized, ...guidance[normalized] };
+}
+
+async function generateScript(personaPrompt: string, photoUrl: string | null, model: string, scriptDurationSec: number, excludedWords?: string | null, videoAnalysisSummary?: string): Promise<string> {
+  const duration = getScriptDurationGuidance(scriptDurationSec);
   let systemMessage = `You are a Buzzly video script writer. Write scripts in Taglish (Tagalog-English mix) tone that are easy to narrate and engaging for social media video ads.
 
-IMPORTANT: The script MUST be short enough to be narrated in 45 seconds or less when read aloud at a natural pace. Aim for 80-100 words total.
+IMPORTANT: The script MUST be short enough to be narrated in ${duration.durationSec} seconds or less when read aloud at a natural pace. Aim for ${duration.words} words total.
 
 Follow this exact format:
 - Line 1: An unskippable hook line (attention-grabbing, makes viewer stop scrolling)
-- Lines 2-6: 4-6 short, easy-to-narrate lines about the product benefits and features
+- Middle lines: Short, easy-to-narrate lines about the product benefits and features
 - Last line: A hard call-to-action (CTA) line
 
 Rules:
-- Keep each line short and punchy (max 12 words per line)
-- Total script: 6-8 lines only, 80-100 words max
+- Keep each line short and punchy (max ${duration.maxWordsPerLine} words per line)
+- Total script: ${duration.lines} lines only, ${duration.words} words max
+- Match the requested ${duration.durationSec}-second duration. Do not write extra lines for a longer video.
 - Use conversational Taglish tone
 - Output ONLY the script lines, one per line, no numbering, no labels
 - No stage directions or notes
@@ -675,7 +689,9 @@ async function processJob(jobId: number): Promise<void> {
       await storage.appendJobLog(jobId, `Warning: Video analysis unavailable: ${err.message}. Continuing with product photo and prompt.`);
     }
 
-    const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, excludedWords, videoAnalysisSummary));
+    const scriptDurationSec = normalizeScriptDurationSec(asset.scriptDurationSec || (job.userId ? await storage.getScriptDurationSec(job.userId) : 60));
+    await storage.appendJobLog(jobId, `Using ${scriptDurationSec}s target script duration`);
+    const scriptText = sanitizeNarrationScript(await generateScript(asset.personaPrompt, photoUrl, asset.openaiModel, scriptDurationSec, excludedWords, videoAnalysisSummary));
     await assertJobNotStopped(jobId);
     if (!scriptText) throw new Error("Generated script was empty after removing non-narration sections");
     await storage.updateJob(jobId, { scriptText });

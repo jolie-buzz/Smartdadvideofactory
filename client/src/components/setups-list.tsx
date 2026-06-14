@@ -114,6 +114,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<SetupSortMode>("recent");
   const [viewMode, setViewMode] = useState<SetupViewMode>("list");
+  const [expandedMobileAssetIds, setExpandedMobileAssetIds] = useState<number[]>([]);
 
   const assetsQuery = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
@@ -314,6 +315,14 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
     ));
   };
 
+  const toggleMobileDetails = (assetId: number) => {
+    setExpandedMobileAssetIds((current) => (
+      current.includes(assetId)
+        ? current.filter((id) => id !== assetId)
+        : [...current, assetId]
+    ));
+  };
+
   const allSelected = sortedAssets.length > 0 && sortedAssets.every((asset) => selectedAssetIds.includes(asset.id));
   const musicOptions = [
     ...FREE_MUSIC_LIBRARY.map((track) => ({
@@ -495,20 +504,21 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         const selectedScriptPrompt = scriptPromptsQuery.data?.find((prompt) => prompt.id === asset.scriptPromptId);
         const lastUsedAt = lastUsedByAssetId.get(asset.id);
         const isGridView = viewMode === "grid";
+        const isMobileExpanded = expandedMobileAssetIds.includes(asset.id);
         return (
         <Card key={asset.id} className="overflow-x-clip">
-          <CardContent className={isGridView ? "p-3" : "p-2 sm:p-3"}>
+          <CardContent className={isGridView ? "p-3" : "p-2 max-sm:p-2 sm:p-3"}>
             <div className={`flex min-w-0 items-start gap-3 ${isGridView ? "max-sm:flex-col md:flex-col" : "max-sm:flex-row"}`}>
               <Checkbox
                 checked={selectedAssetIds.includes(asset.id)}
                 onCheckedChange={(value) => toggleSelected(asset.id, Boolean(value))}
-                className={`shrink-0 ${isGridView ? "mt-1 max-sm:mt-1" : "mt-7 max-sm:mt-5"}`}
+                className={`shrink-0 ${isGridView ? "mt-1 max-sm:mt-1" : "mt-7 max-sm:mt-4"}`}
                 aria-label={`Select ${asset.name}`}
                 data-testid={`checkbox-select-setup-${asset.id}`}
               />
               <button
                 type="button"
-                className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground ${isGridView ? "aspect-video h-auto w-full max-sm:h-32 max-sm:w-full" : "h-20 w-20 max-sm:h-16 max-sm:w-16"}`}
+                className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-muted-foreground ${isGridView ? "aspect-video h-auto w-full max-sm:h-24 max-sm:w-full" : "h-20 w-20 max-sm:h-12 max-sm:w-12"}`}
                 onClick={() => onOpenStudio?.(asset, media)}
                 disabled={!onOpenStudio}
                 title="Open in Studio"
@@ -520,13 +530,18 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </span>
                 )}
               </button>
-              <div className={`w-full min-w-0 flex-1 ${isGridView ? "space-y-2" : "space-y-2 max-sm:space-y-1"}`}>
+              <div className={`w-full min-w-0 flex-1 ${isGridView ? "space-y-2" : "space-y-2 max-sm:space-y-1.5"}`}>
                 <div className="flex items-start justify-between gap-3 max-lg:flex-col">
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <div className={`flex min-w-0 items-center gap-2 ${isGridView ? "flex-wrap" : "flex-nowrap"}`}>
-                      <h3 className={`min-w-0 truncate font-medium leading-5 ${isGridView ? "" : "max-sm:text-sm"}`} data-testid={`text-asset-name-${asset.id}`}>
+                      <button
+                        type="button"
+                        className={`min-w-0 truncate text-left font-medium leading-5 hover:text-primary ${isGridView ? "" : "max-sm:text-sm"}`}
+                        onClick={() => toggleMobileDetails(asset.id)}
+                        data-testid={`button-toggle-setup-details-${asset.id}`}
+                      >
                         {asset.name}
-                      </h3>
+                      </button>
                       <Button
                         type="button"
                         size="icon"
@@ -543,7 +558,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                         <Badge variant="outline" className="shrink-0 text-xs">Recovered</Badge>
                       )}
                       {asset.voiceName && (
-                        <Badge variant="secondary" className={`min-w-0 max-w-[260px] truncate text-xs max-sm:max-w-full ${isGridView ? "" : "max-sm:max-w-[110px]"}`}>
+                        <Badge variant="secondary" className={`min-w-0 max-w-[260px] truncate text-xs max-sm:hidden ${isGridView ? "" : "max-sm:max-w-[110px]"}`}>
                           <Mic className="mr-1 h-3 w-3 shrink-0" />
                           {asset.voiceName}
                         </Badge>
@@ -643,7 +658,50 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </div>
                 </div>
 
-                <div className={`grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-4 ${isGridView ? "" : ""}`}>
+                <div className="grid min-w-0 grid-cols-4 gap-1 sm:hidden">
+                  <button
+                    type="button"
+                    className="min-w-0 rounded-md border bg-muted/30 px-1.5 py-1 text-left"
+                    onClick={() => toggleMobileDetails(asset.id)}
+                    data-testid={`button-mobile-prompt-box-${asset.id}`}
+                  >
+                    <ScrollText className="mb-0.5 h-3.5 w-3.5" />
+                    <span className="block truncate text-[10px] text-muted-foreground">Prompt</span>
+                    <span className="block truncate text-[11px]">{selectedScriptPrompt?.name || "Custom"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="min-w-0 rounded-md border bg-muted/30 px-1.5 py-1 text-left"
+                    onClick={() => toggleMobileDetails(asset.id)}
+                    data-testid={`button-mobile-duration-box-${asset.id}`}
+                  >
+                    <Clock className="mb-0.5 h-3.5 w-3.5" />
+                    <span className="block truncate text-[10px] text-muted-foreground">Time</span>
+                    <span className="block truncate text-[11px]">{normalizeScriptDuration(asset.scriptDurationSec)}s</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="min-w-0 rounded-md border bg-muted/30 px-1.5 py-1 text-left"
+                    onClick={() => toggleMobileDetails(asset.id)}
+                    data-testid={`button-mobile-voice-box-${asset.id}`}
+                  >
+                    <Mic className="mb-0.5 h-3.5 w-3.5" />
+                    <span className="block truncate text-[10px] text-muted-foreground">Voice</span>
+                    <span className="block truncate text-[11px]">{asset.voiceName || "None"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="min-w-0 rounded-md border bg-muted/30 px-1.5 py-1 text-left"
+                    onClick={() => toggleMobileDetails(asset.id)}
+                    data-testid={`button-mobile-music-box-${asset.id}`}
+                  >
+                    <Music className="mb-0.5 h-3.5 w-3.5" />
+                    <span className="block truncate text-[10px] text-muted-foreground">Music</span>
+                    <span className="block truncate text-[11px]">{selectedMusicLabel || "None"}</span>
+                  </button>
+                </div>
+
+                <div className={`min-w-0 gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-4 ${isMobileExpanded ? "max-sm:grid" : "max-sm:hidden"}`}>
                   <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Script prompt</p>
                     <Select
@@ -761,7 +819,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </div>
                 </div>
 
-                <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground ${isGridView ? "" : "max-sm:gap-x-2 max-sm:text-[11px]"}`}>
+                <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground ${isGridView ? "" : isMobileExpanded ? "max-sm:gap-x-2 max-sm:text-[11px]" : "max-sm:hidden"}`}>
                   <span className="flex items-center gap-1">
                     <Image className="w-3 h-3" /> {asset.photoKey ? "Photo" : "No photo"}
                   </span>

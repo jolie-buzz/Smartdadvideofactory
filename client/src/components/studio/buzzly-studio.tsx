@@ -2515,7 +2515,7 @@ export function BuzzlyStudio({ initialGoal = null, onChangeGoal }: BuzzlyStudioP
             isProductionRail ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_320px]"
           }`}>
             {isProductionRail ? (
-              <section className="min-h-0 overflow-y-auto overflow-x-hidden p-4 max-md:p-0 max-md:pt-[env(safe-area-inset-top)]">
+              <section className="min-h-0 overflow-y-auto overflow-x-clip p-4 max-md:p-0 max-md:pt-[env(safe-area-inset-top)]">
                 <StudioWorkflowPanel
                   activeRail={activeRail}
                   editingAsset={editingAsset}
@@ -3186,7 +3186,7 @@ function StudioWorkflowPanel({
     : titles.setup;
 
   return (
-    <div className="dark mx-auto flex min-h-full w-full min-w-0 max-w-6xl flex-col overflow-hidden rounded-xl border border-white/10 bg-background text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:max-w-none max-md:rounded-none max-md:border-x-0 max-md:border-t-0">
+    <div className="dark mx-auto flex min-h-full w-full min-w-0 max-w-6xl flex-col overflow-x-clip rounded-xl border border-white/10 bg-background text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.28)] max-md:max-w-none max-md:rounded-none max-md:border-x-0 max-md:border-t-0">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-4 max-md:px-4 max-md:py-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-primary">Buzzly Studio</p>
@@ -3201,7 +3201,7 @@ function StudioWorkflowPanel({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-6 max-md:px-3 max-md:py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-clip px-5 py-6 max-md:px-3 max-md:py-4">
         {activeRail === "setup" && goal && setupMode === "guided" && !editingAsset && (
           <GuidedSetupWizard
             goal={goal}

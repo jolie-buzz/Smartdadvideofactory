@@ -315,7 +315,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
 
   if (assetsQuery.isLoading) {
     return (
-      <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-hidden">
+      <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-x-clip">
         {[1, 2, 3].map((i) => (
           <Card key={i}>
             <CardContent className="p-6">
@@ -348,13 +348,13 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   }
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-hidden">
+    <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 overflow-x-clip">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">Saved Setups</h2>
         <Badge variant="secondary">{sortedAssets.length} setup{sortedAssets.length !== 1 ? "s" : ""}</Badge>
       </div>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-x-clip">
         <CardContent className="space-y-3 p-3">
           <div className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
             <div className="relative min-w-0">
@@ -482,7 +482,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         const lastUsedAt = lastUsedByAssetId.get(asset.id);
         const isGridView = viewMode === "grid";
         return (
-        <Card key={asset.id} className="overflow-hidden">
+        <Card key={asset.id} className="overflow-x-clip">
           <CardContent className={isGridView ? "p-3" : "p-2 sm:p-3"}>
             <div className={`flex min-w-0 items-start gap-3 ${isGridView ? "max-sm:flex-col md:flex-col" : "max-sm:flex-row"}`}>
               <Checkbox

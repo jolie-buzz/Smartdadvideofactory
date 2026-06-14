@@ -8,9 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star, Download, Music, Search, LayoutGrid, List, Clock, Sparkles } from "lucide-react";
+import { Zap, Trash2, Image, Film, Mic, Settings, FolderOpen, Loader2, Pencil, Brain, Clapperboard, Copy, Star, Download, Music, Search, LayoutGrid, List, Clock, Sparkles, ScrollText } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Asset } from "@shared/schema";
+import type { Asset, ScriptPrompt } from "@shared/schema";
 import { FREE_MUSIC_LIBRARY } from "./studio/free-music-library";
 
 export type AssetMediaUrls = {
@@ -40,6 +40,10 @@ type JobSummary = {
 
 type SetupSortMode = "recent" | "newest" | "favorite" | "name";
 type SetupViewMode = "list" | "grid";
+const SCRIPT_DURATION_OPTIONS = [15, 30, 45, 60, 90] as const;
+const normalizeScriptDuration = (value: unknown) => (
+  SCRIPT_DURATION_OPTIONS.includes(Number(value) as any) ? Number(value) : 60
+);
 
 interface SetupsListProps {
   onActivate: () => void;
@@ -127,6 +131,9 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   const musicLibraryQuery = useQuery<MusicLibraryTrack[]>({
     queryKey: ["/api/music-library"],
   });
+  const scriptPromptsQuery = useQuery<ScriptPrompt[]>({
+    queryKey: ["/api/script-prompts"],
+  });
 
   const lastUsedByAssetId = useMemo(() => {
     const map = new Map<number, string>();
@@ -209,14 +216,20 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
   });
 
   const quickUpdateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<Pick<Asset, "voiceId" | "voiceName" | "musicKey">> }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: Partial<Pick<Asset, "voiceId" | "voiceName" | "musicKey" | "personaPrompt" | "scriptPromptId" | "scriptDurationSec">>;
+    }) => {
       const res = await apiRequest("PATCH", `/api/assets/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
       invalidateAssetsCache();
       queryClient.invalidateQueries({ queryKey: ["/api/music-library"] });
-      toast({ title: "Setup updated", description: "Voice or music has been changed." });
+      toast({ title: "Setup saved", description: "Your setup changes are now active." });
     },
     onError: (err: Error) => {
       toast({ title: "Update error", description: err.message, variant: "destructive" });
@@ -479,6 +492,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
         const media = mediaUrlsQuery.data?.[asset.id];
         const isRecovered = asset.name.startsWith("Recovered Asset ");
         const selectedMusicLabel = musicOptions.find((option) => option.key === asset.musicKey)?.label;
+        const selectedScriptPrompt = scriptPromptsQuery.data?.find((prompt) => prompt.id === asset.scriptPromptId);
         const lastUsedAt = lastUsedByAssetId.get(asset.id);
         const isGridView = viewMode === "grid";
         return (
@@ -629,7 +643,68 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   </div>
                 </div>
 
-                <div className={`grid min-w-0 gap-2 md:grid-cols-2 ${isGridView ? "" : "max-sm:hidden"}`}>
+                <div className={`grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-4 ${isGridView ? "" : ""}`}>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-[11px] text-muted-foreground">Script prompt</p>
+                    <Select
+                      value={asset.scriptPromptId ? String(asset.scriptPromptId) : "custom"}
+                      onValueChange={(value) => {
+                        if (value === "custom") {
+                          quickUpdateMutation.mutate({
+                            id: asset.id,
+                            data: { scriptPromptId: null },
+                          });
+                          return;
+                        }
+                        const prompt = scriptPromptsQuery.data?.find((item) => String(item.id) === value);
+                        if (!prompt) return;
+                        quickUpdateMutation.mutate({
+                          id: asset.id,
+                          data: {
+                            scriptPromptId: prompt.id,
+                            personaPrompt: prompt.promptText,
+                          },
+                        });
+                      }}
+                      disabled={quickUpdateMutation.isPending || scriptPromptsQuery.isLoading}
+                    >
+                      <SelectTrigger className="h-8 min-w-0 text-xs" data-testid={`select-card-script-prompt-${asset.id}`}>
+                        <SelectValue placeholder={selectedScriptPrompt?.name || "Custom prompt"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="custom">Custom prompt</SelectItem>
+                        {(scriptPromptsQuery.data || []).map((prompt) => (
+                          <SelectItem key={prompt.id} value={String(prompt.id)}>
+                            {prompt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-[11px] text-muted-foreground">Duration</p>
+                    <Select
+                      value={String(normalizeScriptDuration(asset.scriptDurationSec))}
+                      onValueChange={(value) => {
+                        quickUpdateMutation.mutate({
+                          id: asset.id,
+                          data: { scriptDurationSec: normalizeScriptDuration(value) },
+                        });
+                      }}
+                      disabled={quickUpdateMutation.isPending}
+                    >
+                      <SelectTrigger className="h-8 min-w-0 text-xs" data-testid={`select-card-script-duration-${asset.id}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SCRIPT_DURATION_OPTIONS.map((duration) => (
+                          <SelectItem key={duration} value={String(duration)}>
+                            {duration}s
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Voice</p>
                     <Select
@@ -696,6 +771,10 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   <span className="flex items-center gap-1">
                     <Brain className="w-3 h-3" />
                     {asset.openaiModel || "gpt-4o"}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <ScrollText className="w-3 h-3" />
+                    {normalizeScriptDuration(asset.scriptDurationSec)}s script
                   </span>
                   <span className={`flex items-center gap-1 ${isGridView ? "" : "max-sm:hidden"}`}>
                     <Settings className="w-3 h-3" />

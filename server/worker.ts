@@ -68,6 +68,7 @@ const transcriptionClient = process.env.OPENAI_API_KEY
     : null;
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const FINAL_RENDER_PRESET = process.env.FINAL_RENDER_PRESET || "veryfast";
 
 class TtsProviderError extends Error {
   constructor(
@@ -265,9 +266,61 @@ function runFfmpeg(args: string[], timeoutMs: number = 600_000): Promise<string>
   });
 }
 
+function probeMediaDurationSeconds(inputPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegStatic || "ffmpeg", ["-i", inputPath], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+    proc.on("close", () => {
+      const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr);
+      if (!match) {
+        reject(new Error(`Could not detect media duration: ${sanitizeFfmpegOutput(stderr).slice(-500)}`));
+        return;
+      }
+      const hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      const seconds = Number(match[3]);
+      const duration = hours * 3600 + minutes * 60 + seconds;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error("Detected media duration was invalid"));
+        return;
+      }
+      resolve(Number(duration.toFixed(3)));
+    });
+    proc.on("error", reject);
+  });
+}
+
+function getVoiceSilenceFilter(settings: {
+  thresholdDb: number;
+  removeSilencesLongerThan: number;
+  ignoreDetectionsShorterThan: number;
+}) {
+  return `silenceremove=stop_periods=-1:stop_duration=${settings.removeSilencesLongerThan}:stop_threshold=${settings.thresholdDb}dB:window=${settings.ignoreDetectionsShorterThan}`;
+}
+
+async function cleanVoiceoverFile(
+  inputPath: string,
+  outputPath: string,
+  settings: {
+    thresholdDb: number;
+    removeSilencesLongerThan: number;
+    ignoreDetectionsShorterThan: number;
+  }
+): Promise<void> {
+  await runFfmpeg([
+    "-i", inputPath,
+    "-af", getVoiceSilenceFilter(settings),
+    "-c:a", "libmp3lame",
+    "-q:a", "3",
+    "-y",
+    outputPath,
+  ], 180_000);
+}
+
 /**
- * Single FFmpeg pass: silenceremove voice + mix with video (streamed from R2 URL) + optional music.
- * No local video download needed — FFmpeg reads directly from the presigned URL.
+ * Final render uses the cleaned voiceover duration as the source of truth.
+ * Video and music loop if needed, then hard-trim to exactly the voiceover length.
  */
 async function combineAllInOne(
   voicePath: string | null,
@@ -275,18 +328,17 @@ async function combineAllInOne(
   musicUrl: string | null,
   outputPath: string,
   settings: {
-    thresholdDb: number;
-    removeSilencesLongerThan: number;
-    ignoreDetectionsShorterThan: number;
     voiceVolume: number;
     musicVolume: number;
+    targetDurationSec: number;
   }
 ): Promise<void> {
-  const { thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, voiceVolume, musicVolume } = settings;
-  const silenceFilter = `silenceremove=stop_periods=-1:stop_duration=${removeSilencesLongerThan}:stop_threshold=${thresholdDb}dB:window=${ignoreDetectionsShorterThan}`;
+  const { voiceVolume, musicVolume } = settings;
+  const targetDurationSec = Math.max(0.1, Number(settings.targetDurationSec.toFixed(3)));
 
   const args: string[] = [
     "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+    "-stream_loop", "-1",
     "-i", videoUrl,
   ];
 
@@ -295,10 +347,9 @@ async function combineAllInOne(
       args.push("-i", musicUrl);
       args.push(
         "-filter_complex",
-        `[1:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop]`,
+        `[1:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30,atrim=0:${targetDurationSec},asetpts=PTS-STARTPTS[aout]`,
         "-map", "0:v:0",
-        "-map", "[musicloop]",
-        "-shortest",
+        "-map", "[aout]",
       );
     } else {
       args.push(
@@ -307,7 +358,12 @@ async function combineAllInOne(
       );
     }
     args.push(
-      "-c:v", "copy",
+      "-t", String(targetDurationSec),
+      "-c:v", "libx264",
+      "-preset", FINAL_RENDER_PRESET,
+      "-crf", "23",
+      "-threads", "1",
+      "-pix_fmt", "yuv420p",
       "-c:a", "aac",
       "-b:a", "192k",
       "-movflags", "+faststart",
@@ -324,22 +380,26 @@ async function combineAllInOne(
     args.push("-i", musicUrl);
     args.push(
       "-filter_complex",
-      `[1:a]${silenceFilter},volume=${voiceVolume}[voice];[2:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30[musicloop];[voice][musicloop]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+      `[1:a]volume=${voiceVolume},atrim=0:${targetDurationSec},asetpts=PTS-STARTPTS[voice];[2:a]volume=${musicVolume},aloop=loop=-1:size=44100*60*30,atrim=0:${targetDurationSec},asetpts=PTS-STARTPTS[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=0,atrim=0:${targetDurationSec},asetpts=PTS-STARTPTS[aout]`,
       "-map", "0:v:0",
       "-map", "[aout]",
     );
   } else {
     args.push(
       "-filter_complex",
-      `[1:a]${silenceFilter},volume=${voiceVolume}[aout]`,
+      `[1:a]volume=${voiceVolume},atrim=0:${targetDurationSec},asetpts=PTS-STARTPTS[aout]`,
       "-map", "0:v:0",
       "-map", "[aout]",
-      "-shortest",
     );
   }
 
   args.push(
-    "-c:v", "copy",
+    "-t", String(targetDurationSec),
+    "-c:v", "libx264",
+    "-preset", FINAL_RENDER_PRESET,
+    "-crf", "23",
+    "-threads", "1",
+    "-pix_fmt", "yuv420p",
     "-c:a", "aac",
     "-b:a", "192k",
     "-movflags", "+faststart",
@@ -728,13 +788,9 @@ async function processJob(jobId: number): Promise<void> {
     await writeFile(voiceRawPath, audioRawBuffer);
 
     const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
+    const audioCleanKey = `jobs/${jobId}/voice_clean.mp3`;
+    const voiceCleanPath = join(workDir, "voice_clean.mp3");
 
-    // ── Step 3: Parallel — upload raw audio + run combined FFmpeg pass ───────
-    await assertJobNotStopped(jobId);
-    await storage.updateJob(jobId, { status: "rendering" });
-    await storage.appendJobLog(jobId, `Running combined FFmpeg pass (silenceremove + mix) + uploading raw audio in parallel...`);
-
-    const finalPath = join(workDir, "final.mp4");
     const combineSettings = {
       thresholdDb: asset.thresholdDb,
       removeSilencesLongerThan: asset.removeSilencesLongerThan,
@@ -742,10 +798,42 @@ async function processJob(jobId: number): Promise<void> {
       voiceVolume: asset.voiceVolume,
       musicVolume: asset.musicVolume,
     };
+    let audioCleanBuffer = audioRawBuffer;
+    let voiceDurationSec = 1;
+    if (shouldMixVoice) {
+      try {
+        await storage.appendJobLog(jobId, "Cleaning voiceover and measuring exact narration duration...");
+        await cleanVoiceoverFile(voiceRawPath, voiceCleanPath, combineSettings);
+        audioCleanBuffer = await readFile(voiceCleanPath);
+        voiceDurationSec = await probeMediaDurationSeconds(voiceCleanPath);
+      } catch (err: any) {
+        await storage.appendJobLog(jobId, `Warning: Voice cleanup failed (${err.message}). Using raw voiceover duration.`);
+        audioCleanBuffer = audioRawBuffer;
+        await writeFile(voiceCleanPath, audioCleanBuffer);
+        voiceDurationSec = await probeMediaDurationSeconds(voiceRawPath);
+      }
+    } else {
+      await writeFile(voiceCleanPath, audioCleanBuffer);
+      voiceDurationSec = await probeMediaDurationSeconds(voiceRawPath).catch(() => 1);
+    }
+    voiceDurationSec = Math.max(0.1, Number(voiceDurationSec.toFixed(3)));
+    await storage.appendJobLog(jobId, `Voiceover duration locked at ${voiceDurationSec}s. Video, music, and captions will trim to this exact length.`);
+
+    // ── Step 3: Parallel — upload audio + run combined FFmpeg pass ───────────
+    await assertJobNotStopped(jobId);
+    await storage.updateJob(jobId, { status: "rendering" });
+    await storage.appendJobLog(jobId, `Rendering final video to match voiceover duration exactly...`);
+
+    const finalPath = join(workDir, "final.mp4");
+    const finalCombineSettings = {
+      voiceVolume: combineSettings.voiceVolume,
+      musicVolume: combineSettings.musicVolume,
+      targetDurationSec: voiceDurationSec,
+    };
     const renderFinalVideo = async () => {
       try {
         logMemory("worker: before ffmpeg final render", { jobId });
-        await combineAllInOne(shouldMixVoice ? voiceRawPath : null, videoUrl, musicUrl, finalPath, combineSettings);
+        await combineAllInOne(shouldMixVoice ? voiceCleanPath : null, videoUrl, musicUrl, finalPath, finalCombineSettings);
         logMemory("worker: after ffmpeg final render", { jobId });
       } catch (err) {
         await storage.appendJobLog(
@@ -757,21 +845,22 @@ async function processJob(jobId: number): Promise<void> {
         await downloadFileFromR2(asset.videoKey, localVideoPath);
         logMemory("worker: after fallback r2 download", { jobId, key: asset.videoKey });
         logMemory("worker: before fallback ffmpeg final render", { jobId });
-        await combineAllInOne(shouldMixVoice ? voiceRawPath : null, localVideoPath, musicUrl, finalPath, combineSettings);
+        await combineAllInOne(shouldMixVoice ? voiceCleanPath : null, localVideoPath, musicUrl, finalPath, finalCombineSettings);
         logMemory("worker: after fallback ffmpeg final render", { jobId });
       }
     };
 
-    logMemory("worker: before raw audio upload/render", { jobId });
+    logMemory("worker: before audio upload/render", { jobId });
     await Promise.all([
       uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
+      uploadToR2(audioCleanKey, audioCleanBuffer, "audio/mpeg"),
       renderFinalVideo(),
     ]);
     await assertJobNotStopped(jobId);
-    logMemory("worker: after raw audio upload/render", { jobId });
+    logMemory("worker: after audio upload/render", { jobId });
 
-    await storage.updateJob(jobId, { audioRawKey });
-    await storage.appendJobLog(jobId, "FFmpeg pass complete.");
+    await storage.updateJob(jobId, { audioRawKey, audioCleanKey });
+    await storage.appendJobLog(jobId, "FFmpeg pass complete at exact voiceover length.");
 
     // ── Step 4: Auto-captions (optional) ────────────────────────────────────
     let outputPath = finalPath;
@@ -779,7 +868,7 @@ async function processJob(jobId: number): Promise<void> {
       await assertJobNotStopped(jobId);
       await storage.appendJobLog(jobId, "Generating captions via AI transcription...");
       try {
-        const srtContent = await transcribeAudio(audioRawBuffer, workDir);
+        const srtContent = await transcribeAudio(audioCleanBuffer, workDir);
         await assertJobNotStopped(jobId);
         await storage.appendJobLog(jobId, "Burning captions into video...");
         const captionedPath = join(workDir, "final_captioned.mp4");

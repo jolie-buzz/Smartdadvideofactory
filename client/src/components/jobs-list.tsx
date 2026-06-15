@@ -275,6 +275,11 @@ export function JobsList() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [pendingTikTokJob, setPendingTikTokJob] = useState<JobWithAsset | null>(null);
   const [tiktokCaption, setTikTokCaption] = useState("");
+  const [tiktokPublishStatus, setTikTokPublishStatus] = useState<{
+    state: "idle" | "sending" | "success" | "error";
+    message?: string;
+    publishId?: string;
+  }>({ state: "idle" });
   const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
@@ -461,6 +466,10 @@ export function JobsList() {
 
   const publishTikTokMutation = useMutation({
     mutationFn: async ({ job, title }: { job: JobWithAsset; title: string }) => {
+      setTikTokPublishStatus({
+        state: "sending",
+        message: "Uploading the final video to TikTok. Keep this dialog open until it finishes.",
+      });
       const res = await fetch(`/api/jobs/${job.id}/tiktok/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -481,14 +490,21 @@ export function JobsList() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
-      setPendingTikTokJob(null);
-      setTikTokCaption("");
+      setTikTokPublishStatus({
+        state: "success",
+        message: "TikTok accepted the upload into its publish queue. It may take a moment before it appears in the TikTok app.",
+        publishId: data.publishId,
+      });
       toast({
-        title: "Sent to TikTok",
-        description: `TikTok publish ID: ${data.publishId}`,
+        title: "TikTok upload accepted",
+        description: `Publish ID: ${data.publishId}`,
       });
     },
     onError: (err: Error) => {
+      setTikTokPublishStatus({
+        state: "error",
+        message: err.message,
+      });
       toast({ title: "TikTok publish failed", description: err.message, variant: "destructive" });
     },
   });
@@ -508,6 +524,7 @@ export function JobsList() {
     }
     setPendingTikTokJob(job);
     setTikTokCaption(socialMediaCaption(job));
+    setTikTokPublishStatus({ state: "idle" });
   };
 
   const copyShareLink = async (token: string) => {
@@ -939,6 +956,7 @@ export function JobsList() {
         if (!open && !publishTikTokMutation.isPending) {
           setPendingTikTokJob(null);
           setTikTokCaption("");
+          setTikTokPublishStatus({ state: "idle" });
         }
       }}>
         <DialogContent>
@@ -974,21 +992,51 @@ export function JobsList() {
               From Social Media Caption • {tiktokCaption.length}/2200
             </div>
           </div>
+          {tiktokPublishStatus.state !== "idle" && (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                tiktokPublishStatus.state === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+                  : tiktokPublishStatus.state === "error"
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "bg-muted/40 text-muted-foreground"
+              }`}
+              data-testid="tiktok-publish-status"
+            >
+              <div className="flex items-start gap-2">
+                {tiktokPublishStatus.state === "sending" && <Loader2 className="mt-0.5 h-4 w-4 animate-spin" />}
+                {tiktokPublishStatus.state === "success" && <CheckCircle2 className="mt-0.5 h-4 w-4" />}
+                {tiktokPublishStatus.state === "error" && <AlertCircle className="mt-0.5 h-4 w-4" />}
+                <div className="space-y-1">
+                  <div className="font-medium">
+                    {tiktokPublishStatus.state === "sending" && "Sending to TikTok"}
+                    {tiktokPublishStatus.state === "success" && "Accepted by TikTok"}
+                    {tiktokPublishStatus.state === "error" && "TikTok did not post it"}
+                  </div>
+                  <div>{tiktokPublishStatus.message}</div>
+                  {tiktokPublishStatus.publishId && (
+                    <div className="text-xs opacity-80">Publish ID: {tiktokPublishStatus.publishId}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => {
                 setPendingTikTokJob(null);
                 setTikTokCaption("");
+                setTikTokPublishStatus({ state: "idle" });
               }}
               disabled={publishTikTokMutation.isPending}
               data-testid="button-cancel-tiktok-publish"
             >
-              Cancel
+              {tiktokPublishStatus.state === "success" ? "Done" : "Cancel"}
             </Button>
             <Button
               onClick={() => pendingTikTokJob && publishTikTokMutation.mutate({ job: pendingTikTokJob, title: tiktokCaption })}
-              disabled={!pendingTikTokJob || publishTikTokMutation.isPending || !tiktokCaption.trim()}
+              disabled={!pendingTikTokJob || publishTikTokMutation.isPending || !tiktokCaption.trim() || tiktokPublishStatus.state === "success"}
               data-testid="button-confirm-tiktok-publish"
             >
               {publishTikTokMutation.isPending ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending...</> : "Post to TikTok"}

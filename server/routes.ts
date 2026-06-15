@@ -73,6 +73,8 @@ const TIKTOK_SCOPES = ["user.info.basic", "video.publish"];
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
 const TIKTOK_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
+const TIKTOK_CLIENT_KEY_ENV_NAMES = ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_ID", "TIKTOK_APP_ID"];
+const TIKTOK_CLIENT_SECRET_ENV_NAMES = ["TIKTOK_CLIENT_SECRET", "TIKTOK_CLIENT_SECRET_KEY", "TIKTOK_SECRET_KEY", "TIKTOK_APP_SECRET"];
 const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] || "" : value || "";
 const routeParamInt = (value: string | string[] | undefined) => parseInt(routeParam(value), 10);
 const canAccessUserOwnedRecord = (user: Express.User, ownerId?: number | null) => (
@@ -88,15 +90,37 @@ type TikTokTokenResponse = {
   refresh_expires_in: number;
 };
 
-const tiktokConfigured = () => Boolean(process.env.TIKTOK_CLIENT_KEY && process.env.TIKTOK_CLIENT_SECRET);
+const firstEnvValue = (names: string[]) => {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return { name, value };
+  }
+  return null;
+};
+
+const getTikTokConfigStatus = () => {
+  const clientKey = firstEnvValue(TIKTOK_CLIENT_KEY_ENV_NAMES);
+  const clientSecret = firstEnvValue(TIKTOK_CLIENT_SECRET_ENV_NAMES);
+  return {
+    configured: Boolean(clientKey && clientSecret),
+    hasClientKey: Boolean(clientKey),
+    hasClientSecret: Boolean(clientSecret),
+    clientKeyName: clientKey?.name || null,
+    clientSecretName: clientSecret?.name || null,
+  };
+};
+
+const tiktokConfigured = () => getTikTokConfigStatus().configured;
 
 const requireTikTokConfig = () => {
-  if (!process.env.TIKTOK_CLIENT_KEY || !process.env.TIKTOK_CLIENT_SECRET) {
-    throw new Error("TikTok is not configured. Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET in production.");
+  const clientKey = firstEnvValue(TIKTOK_CLIENT_KEY_ENV_NAMES);
+  const clientSecret = firstEnvValue(TIKTOK_CLIENT_SECRET_ENV_NAMES);
+  if (!clientKey || !clientSecret) {
+    throw new Error("TikTok is not configured. Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET in production, then restart/redeploy the app.");
   }
   return {
-    clientKey: process.env.TIKTOK_CLIENT_KEY,
-    clientSecret: process.env.TIKTOK_CLIENT_SECRET,
+    clientKey: clientKey.value,
+    clientSecret: clientSecret.value,
   };
 };
 
@@ -616,9 +640,10 @@ export async function registerRoutes(
   app.get("/api/tiktok/status", requireAuth, async (req, res) => {
     try {
       const connection = await getTikTokConnection(req.user!.id);
+      const configStatus = getTikTokConfigStatus();
       res.json({
         connected: Boolean(connection),
-        configured: tiktokConfigured(),
+        ...configStatus,
         redirectUri: TIKTOK_REDIRECT_URI,
         openId: connection?.openId,
         scope: connection?.scope,

@@ -66,6 +66,8 @@ type DownloadState = {
 type TikTokStatus = {
   connected: boolean;
   configured: boolean;
+  hasClientKey?: boolean;
+  hasClientSecret?: boolean;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {

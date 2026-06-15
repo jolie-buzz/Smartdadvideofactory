@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, KeyRound, Loader2, LogOut, Music, Pencil, Plus, Send, Shield, Sparkles, Trash2, Upload, User, X } from "lucide-react";
+import { Check, KeyRound, Loader2, LogOut, Music, Pencil, Plus, RefreshCw, Send, Shield, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { invalidateAssetsCache, queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +35,10 @@ type AdminGeneralPrompts = {
 type TikTokStatus = {
   connected: boolean;
   configured: boolean;
+  hasClientKey?: boolean;
+  hasClientSecret?: boolean;
+  clientKeyName?: string | null;
+  clientSecretName?: string | null;
   redirectUri: string;
   openId?: string;
   scope?: string;
@@ -343,11 +347,25 @@ export function StudioSettingsPanel() {
                   {tiktokStatusQuery.data?.connected
                     ? `Authorized scopes: ${tiktokStatusQuery.data.scope || "TikTok posting"}`
                     : tiktokStatusQuery.data?.configured
-                      ? "Ready to authorize this Buzzly account with TikTok."
-                      : "Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET in production before connecting."}
+                      ? `Ready to authorize. Server detected ${tiktokStatusQuery.data.clientKeyName || "client key"} and ${tiktokStatusQuery.data.clientSecretName || "client secret"}.`
+                      : `Missing on server: ${[
+                          !tiktokStatusQuery.data?.hasClientKey ? "client key" : null,
+                          !tiktokStatusQuery.data?.hasClientSecret ? "client secret" : null,
+                        ].filter(Boolean).join(" and ") || "TikTok config"}. Add env vars, then restart/redeploy.`}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="gap-2"
+                  onClick={() => tiktokStatusQuery.refetch()}
+                  disabled={tiktokStatusQuery.isFetching}
+                  data-testid="button-refresh-tiktok-status"
+                >
+                  {tiktokStatusQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Refresh
+                </Button>
                 {tiktokStatusQuery.data?.connected ? (
                   <Button
                     type="button"

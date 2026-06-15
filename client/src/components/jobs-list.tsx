@@ -461,13 +461,22 @@ export function JobsList() {
 
   const publishTikTokMutation = useMutation({
     mutationFn: async ({ job, title }: { job: JobWithAsset; title: string }) => {
-      const res = await apiRequest("POST", `/api/jobs/${job.id}/tiktok/publish`, {
-        title: title.trim(),
-        privacyLevel: "SELF_ONLY",
-        brandContentToggle: false,
-        brandOrganicToggle: true,
-        isAigc: true,
+      const res = await fetch(`/api/jobs/${job.id}/tiktok/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title: title.trim(),
+          privacyLevel: "SELF_ONLY",
+          brandContentToggle: false,
+          brandOrganicToggle: true,
+          isAigc: true,
+        }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `TikTok publish failed (${res.status})`);
+      }
       return res.json();
     },
     onSuccess: (data) => {
@@ -936,7 +945,7 @@ export function JobsList() {
           <DialogHeader>
             <DialogTitle>Post to TikTok?</DialogTitle>
             <DialogDescription>
-              This will send the completed video to TikTok as Private/Self only. You can review it in TikTok before making it public.
+              This sends the video as Private/Self only. While the TikTok app is unaudited, the connected TikTok account must also be set to Private in TikTok settings.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border bg-muted/40 p-3 text-sm">
@@ -944,7 +953,10 @@ export function JobsList() {
               {pendingTikTokJob?.assetName || `Job #${pendingTikTokJob?.id}`}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
-              Privacy: Private/Self only
+              Post privacy: Private/Self only
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Testing requirement: TikTok account privacy must be Private until app audit is approved.
             </div>
           </div>
           <div className="space-y-2">

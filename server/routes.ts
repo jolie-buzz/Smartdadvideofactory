@@ -205,7 +205,7 @@ const getActiveTikTokConnection = async (userId: number) => {
 
 const tikTokErrorMessage = (data: any, fallback: string) => (
   data?.error?.code === "unaudited_client_can_only_post_to_private_accounts"
-    ? "TikTok blocked this because the app is still unaudited. For testing, authorize and post using a private TikTok account, then submit the app for TikTok Content Posting API audit to unlock broader posting."
+    ? "TikTok blocked this because the app is still unaudited. For testing, the TikTok account connected to Buzzly must be set to Private in TikTok settings, then reconnect TikTok and try again. Submit the app for TikTok Content Posting API audit to unlock broader posting."
   : data?.error?.code === "privacy_level_option_mismatch"
     ? "TikTok rejected the selected privacy level. Reconnect TikTok and try again so Buzzly can refresh the available privacy options."
   : data?.error?.message

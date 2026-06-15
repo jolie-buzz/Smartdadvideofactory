@@ -457,14 +457,12 @@ export function JobsList() {
     },
   });
 
-  const defaultTikTokCaption = (job: JobWithAsset) => (
-    job.captionText?.trim() || job.assetName || `Buzzly video ${job.id}`
-  );
+  const socialMediaCaption = (job: JobWithAsset) => job.captionText?.trim() || "";
 
   const publishTikTokMutation = useMutation({
     mutationFn: async ({ job, title }: { job: JobWithAsset; title: string }) => {
       const res = await apiRequest("POST", `/api/jobs/${job.id}/tiktok/publish`, {
-        title: title.trim() || defaultTikTokCaption(job),
+        title: title.trim(),
         privacyLevel: "SELF_ONLY",
         brandContentToggle: false,
         brandOrganicToggle: true,
@@ -491,8 +489,16 @@ export function JobsList() {
       window.location.href = "/api/auth/tiktok";
       return;
     }
+    if (!socialMediaCaption(job)) {
+      toast({
+        title: "No Social Media Caption",
+        description: "Generate a Social Media Caption first before posting to TikTok.",
+        variant: "destructive",
+      });
+      return;
+    }
     setPendingTikTokJob(job);
-    setTikTokCaption(defaultTikTokCaption(job));
+    setTikTokCaption(socialMediaCaption(job));
   };
 
   const copyShareLink = async (token: string) => {
@@ -953,7 +959,7 @@ export function JobsList() {
               data-testid="input-tiktok-caption"
             />
             <div className="text-right text-xs text-muted-foreground">
-              {tiktokCaption.length}/2200
+              From Social Media Caption • {tiktokCaption.length}/2200
             </div>
           </div>
           <DialogFooter className="gap-2">

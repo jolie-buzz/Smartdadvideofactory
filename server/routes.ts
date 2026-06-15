@@ -1713,8 +1713,11 @@ export async function registerRoutes(
       const video = await downloadFromR2(job.finalVideoKey);
       if (!video.length) return res.status(400).json({ error: "Final video is empty" });
 
-      const asset = await storage.getAsset(job.assetId);
-      const title = (parsed.data.title || job.captionText || asset?.name || `Buzzly video ${job.id}`).slice(0, 2200);
+      const titleSource = parsed.data.title?.trim() || job.captionText?.trim();
+      if (!titleSource) {
+        return res.status(400).json({ error: "Social Media Caption is required before posting to TikTok" });
+      }
+      const title = titleSource.slice(0, 2200);
       const initRes = await fetch(TIKTOK_VIDEO_INIT_URL, {
         method: "POST",
         headers: {

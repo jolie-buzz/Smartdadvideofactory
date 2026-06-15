@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import AdminPage from "@/pages/admin";
 import AuthPage from "@/pages/auth";
+import LegalPage from "@/pages/legal";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Clock, ShieldX, Loader2 } from "lucide-react";
@@ -92,7 +93,17 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <AppErrorBoundary>
-          <AuthenticatedApp />
+          <Switch>
+            <Route path="/terms">
+              <LegalPage type="terms" />
+            </Route>
+            <Route path="/privacy">
+              <LegalPage type="privacy" />
+            </Route>
+            <Route>
+              <AuthenticatedApp />
+            </Route>
+          </Switch>
         </AppErrorBoundary>
         <PwaInstallPrompt />
       </TooltipProvider>

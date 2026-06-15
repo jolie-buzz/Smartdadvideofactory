@@ -204,7 +204,11 @@ const getActiveTikTokConnection = async (userId: number) => {
 };
 
 const tikTokErrorMessage = (data: any, fallback: string) => (
-  data?.error?.message
+  data?.error?.code === "unaudited_client_can_only_post_to_private_accounts"
+    ? "TikTok blocked this because the app is still unaudited. For testing, authorize and post using a private TikTok account, then submit the app for TikTok Content Posting API audit to unlock broader posting."
+  : data?.error?.code === "privacy_level_option_mismatch"
+    ? "TikTok rejected the selected privacy level. Reconnect TikTok and try again so Buzzly can refresh the available privacy options."
+  : data?.error?.message
   || data?.error_description
   || data?.message
   || data?.error
@@ -1679,6 +1683,33 @@ export async function registerRoutes(
       const connection = await getActiveTikTokConnection(req.user!.id);
       if (!connection) return res.status(404).json({ error: "Connect TikTok first in Settings" });
 
+      const creatorRes = await fetch(TIKTOK_CREATOR_INFO_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${connection.accessToken}`,
+          "Content-Type": "application/json; charset=UTF-8",
+        },
+        body: JSON.stringify({}),
+      });
+      const creatorData: any = await readJson(creatorRes);
+      if (!creatorRes.ok || creatorData.error?.code !== "ok") {
+        return res.status(creatorRes.status || 500).json({
+          error: tikTokErrorMessage(creatorData, "Unable to verify TikTok creator posting options"),
+          details: creatorData,
+        });
+      }
+
+      const privacyLevel = parsed.data.privacyLevel || "SELF_ONLY";
+      const privacyOptions = Array.isArray(creatorData?.data?.privacy_level_options)
+        ? creatorData.data.privacy_level_options
+        : [];
+      if (!privacyOptions.includes(privacyLevel)) {
+        return res.status(400).json({
+          error: `TikTok account does not allow ${privacyLevel}. Available options: ${privacyOptions.join(", ") || "none"}.`,
+          details: creatorData,
+        });
+      }
+
       const video = await downloadFromR2(job.finalVideoKey);
       if (!video.length) return res.status(400).json({ error: "Final video is empty" });
 
@@ -1693,10 +1724,10 @@ export async function registerRoutes(
         body: JSON.stringify({
           post_info: {
             title,
-            privacy_level: parsed.data.privacyLevel || "SELF_ONLY",
-            disable_duet: parsed.data.disableDuet ?? false,
-            disable_stitch: parsed.data.disableStitch ?? false,
-            disable_comment: parsed.data.disableComment ?? false,
+            privacy_level: privacyLevel,
+            disable_duet: parsed.data.disableDuet ?? Boolean(creatorData?.data?.duet_disabled),
+            disable_stitch: parsed.data.disableStitch ?? Boolean(creatorData?.data?.stitch_disabled),
+            disable_comment: parsed.data.disableComment ?? Boolean(creatorData?.data?.comment_disabled),
             brand_content_toggle: parsed.data.brandContentToggle ?? false,
             brand_organic_toggle: parsed.data.brandOrganicToggle ?? true,
             is_aigc: parsed.data.isAigc ?? true,
@@ -1738,7 +1769,7 @@ export async function registerRoutes(
       }
 
       await storage.appendJobLog(job.id, `Published to TikTok direct post queue. Publish ID: ${publishId}`);
-      res.json({ publishId, privacyLevel: parsed.data.privacyLevel || "SELF_ONLY" });
+      res.json({ publishId, privacyLevel, title });
     } catch (err: any) {
       console.error("[tiktok] publish failed:", err);
       res.status(500).json({ error: err.message || "TikTok publish failed" });

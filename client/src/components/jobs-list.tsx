@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Download,
   Share2,
@@ -273,6 +274,7 @@ export function JobsList() {
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [pendingTikTokJob, setPendingTikTokJob] = useState<JobWithAsset | null>(null);
+  const [tiktokCaption, setTikTokCaption] = useState("");
   const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
@@ -455,10 +457,14 @@ export function JobsList() {
     },
   });
 
+  const defaultTikTokCaption = (job: JobWithAsset) => (
+    job.captionText?.trim() || job.assetName || `Buzzly video ${job.id}`
+  );
+
   const publishTikTokMutation = useMutation({
-    mutationFn: async (job: JobWithAsset) => {
+    mutationFn: async ({ job, title }: { job: JobWithAsset; title: string }) => {
       const res = await apiRequest("POST", `/api/jobs/${job.id}/tiktok/publish`, {
-        title: job.captionText || job.assetName || `Buzzly video ${job.id}`,
+        title: title.trim() || defaultTikTokCaption(job),
         privacyLevel: "SELF_ONLY",
         brandContentToggle: false,
         brandOrganicToggle: true,
@@ -469,6 +475,7 @@ export function JobsList() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       setPendingTikTokJob(null);
+      setTikTokCaption("");
       toast({
         title: "Sent to TikTok",
         description: `TikTok publish ID: ${data.publishId}`,
@@ -485,6 +492,7 @@ export function JobsList() {
       return;
     }
     setPendingTikTokJob(job);
+    setTikTokCaption(defaultTikTokCaption(job));
   };
 
   const copyShareLink = async (token: string) => {
@@ -913,7 +921,10 @@ export function JobsList() {
       </Dialog>
 
       <Dialog open={Boolean(pendingTikTokJob)} onOpenChange={(open) => {
-        if (!open && !publishTikTokMutation.isPending) setPendingTikTokJob(null);
+        if (!open && !publishTikTokMutation.isPending) {
+          setPendingTikTokJob(null);
+          setTikTokCaption("");
+        }
       }}>
         <DialogContent>
           <DialogHeader>
@@ -930,18 +941,36 @@ export function JobsList() {
               Privacy: Private/Self only
             </div>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="tiktok-caption">Caption</Label>
+            <Textarea
+              id="tiktok-caption"
+              value={tiktokCaption}
+              onChange={(event) => setTikTokCaption(event.target.value)}
+              rows={6}
+              maxLength={2200}
+              disabled={publishTikTokMutation.isPending}
+              data-testid="input-tiktok-caption"
+            />
+            <div className="text-right text-xs text-muted-foreground">
+              {tiktokCaption.length}/2200
+            </div>
+          </div>
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setPendingTikTokJob(null)}
+              onClick={() => {
+                setPendingTikTokJob(null);
+                setTikTokCaption("");
+              }}
               disabled={publishTikTokMutation.isPending}
               data-testid="button-cancel-tiktok-publish"
             >
               Cancel
             </Button>
             <Button
-              onClick={() => pendingTikTokJob && publishTikTokMutation.mutate(pendingTikTokJob)}
-              disabled={!pendingTikTokJob || publishTikTokMutation.isPending}
+              onClick={() => pendingTikTokJob && publishTikTokMutation.mutate({ job: pendingTikTokJob, title: tiktokCaption })}
+              disabled={!pendingTikTokJob || publishTikTokMutation.isPending || !tiktokCaption.trim()}
               data-testid="button-confirm-tiktok-publish"
             >
               {publishTikTokMutation.isPending ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending...</> : "Post to TikTok"}

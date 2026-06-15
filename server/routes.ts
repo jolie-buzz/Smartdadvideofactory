@@ -66,7 +66,7 @@ const publicMediaUrlFromKey = (key?: string | null) => (
 );
 const ADMIN_MUSIC_LIBRARY_PROMPT = "__ADMIN_MUSIC_LIBRARY__";
 const ADMIN_GENERAL_PROMPTS_NAME = "__ADMIN_GENERAL_PROMPTS__";
-const TIKTOK_SITE_VERIFICATION = "tiktok-developers-site-verification=fdL9JsvstRAXcNNeOYNNYSBLyGe2YmlG";
+const TIKTOK_SITE_VERIFICATION = "tiktok-developers-site-verification=o1CkfV5I1nrAWkeJ2Y4BPTomErETUq0l";
 const TIKTOK_APP_BASE_URL = process.env.TIKTOK_APP_BASE_URL || process.env.PUBLIC_APP_URL || "https://buzzly.brandbuzzer.net";
 const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI || new URL("/api/auth/tiktok/callback", TIKTOK_APP_BASE_URL).toString();
 const TIKTOK_SCOPES = ["user.info.basic", "video.publish"];
@@ -651,6 +651,7 @@ export async function registerRoutes(
   app.get([
     "/tiktok-developers-site-verification",
     "/tiktok-developers-site-verification.txt",
+    "/tiktoko1CkfV5I1nrAWkeJ2Y4BPTomErETUq0l.txt",
     "/tiktokfdL9JsvstRAXcNNeOYNNYSBLyGe2YmlG.txt",
   ], (_req, res) => {
     res.type("text/plain").send(TIKTOK_SITE_VERIFICATION);

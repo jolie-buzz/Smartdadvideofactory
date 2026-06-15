@@ -53,6 +53,18 @@ type JobWithAsset = {
   shareEnabled: boolean;
   shareToken: string | null;
   shareRevokedAt: string | null;
+  tiktokPublishId: string | null;
+  tiktokPublishStatus: string | null;
+  tiktokPublishError: string | null;
+  tiktokPrivacyLevel: string | null;
+  tiktokPostMode: string | null;
+  tiktokOpenId: string | null;
+  tiktokCreatorUsername: string | null;
+  tiktokCreatorNickname: string | null;
+  tiktokAccessTokenFingerprint: string | null;
+  tiktokInitResponse: Record<string, unknown> | null;
+  tiktokStatusResponse: Record<string, unknown> | null;
+  tiktokCreatorInfo: Record<string, unknown> | null;
   logs: string;
   createdAt: string;
   assetName?: string;
@@ -69,6 +81,26 @@ type TikTokStatus = {
   configured: boolean;
   hasClientKey?: boolean;
   hasClientSecret?: boolean;
+  openId?: string | null;
+  scope?: string | null;
+  creatorUsername?: string | null;
+  creatorNickname?: string | null;
+  accessTokenFingerprint?: string | null;
+  privacyLevelOptions?: string[] | null;
+  creatorInfo?: Record<string, unknown> | null;
+  creatorInfoError?: Record<string, unknown> | null;
+};
+
+type TikTokJobStatusResult = {
+  status: "PROCESSING" | "PUBLISHED" | "FAILED" | "REJECTED" | "UNKNOWN";
+  tiktokStatus?: string | null;
+  failReason?: string | null;
+  error?: string | null;
+  publishId?: string | null;
+  openId?: string | null;
+  accessTokenFingerprint?: string | null;
+  raw?: Record<string, unknown> | null;
+  statusResponse?: Record<string, unknown> | null;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {
@@ -279,7 +311,9 @@ export function JobsList() {
     state: "idle" | "sending" | "success" | "error";
     message?: string;
     publishId?: string;
+    raw?: Record<string, unknown> | null;
   }>({ state: "idle" });
+  const [tiktokStatusResults, setTikTokStatusResults] = useState<Record<number, TikTokJobStatusResult>>({});
   const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
@@ -484,7 +518,9 @@ export function JobsList() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `TikTok publish failed (${res.status})`);
+        const err = new Error(data.error || `TikTok publish failed (${res.status})`) as Error & { payload?: any };
+        err.payload = data;
+        throw err;
       }
       return res.json();
     },
@@ -494,18 +530,72 @@ export function JobsList() {
         state: "success",
         message: "TikTok accepted the upload into its publish queue. It may take a moment before it appears in the TikTok app.",
         publishId: data.publishId,
+        raw: data.raw || data.initResponse || null,
       });
+      if (pendingTikTokJob) {
+        setTikTokStatusResults((current) => ({
+          ...current,
+          [pendingTikTokJob.id]: {
+            status: data.status || "PROCESSING",
+            publishId: data.publishId,
+            openId: data.openId,
+            accessTokenFingerprint: data.accessTokenFingerprint,
+            raw: data.raw || null,
+            statusResponse: data.initResponse || null,
+          },
+        }));
+      }
       toast({
         title: "TikTok upload accepted",
         description: `Publish ID: ${data.publishId}`,
       });
     },
-    onError: (err: Error) => {
+    onError: (err: Error & { payload?: any }) => {
       setTikTokPublishStatus({
         state: "error",
         message: err.message,
+        raw: err.payload?.raw || err.payload?.details || null,
       });
       toast({ title: "TikTok publish failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const checkTikTokStatusMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      const res = await fetch(`/api/jobs/${jobId}/tiktok/status`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || `TikTok status check failed (${res.status})`) as Error & { payload?: any; jobId?: number };
+        err.payload = data;
+        err.jobId = jobId;
+        throw err;
+      }
+      return { jobId, data: data as TikTokJobStatusResult };
+    },
+    onSuccess: ({ jobId, data }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setTikTokStatusResults((current) => ({ ...current, [jobId]: data }));
+      toast({ title: "TikTok status checked", description: `Status: ${data.status}` });
+    },
+    onError: (err: Error & { payload?: any; jobId?: number }) => {
+      if (err.jobId) {
+        setTikTokStatusResults((current) => ({
+          ...current,
+          [err.jobId!]: {
+            status: err.payload?.status || "UNKNOWN",
+            error: err.message,
+            publishId: err.payload?.publishId || null,
+            openId: err.payload?.openId || null,
+            accessTokenFingerprint: err.payload?.accessTokenFingerprint || null,
+            raw: err.payload?.raw || null,
+            statusResponse: err.payload?.statusResponse || null,
+          },
+        }));
+      }
+      toast({ title: "TikTok status failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -631,6 +721,10 @@ export function JobsList() {
         const isExpanded = expandedJobs.has(job.id);
         const hasContent = job.scriptText || job.headlineText || job.captionText || job.seoText || job.audioRawKey || job.audioCleanKey || job.logs;
         const finalDownloadState = downloadStates[downloadKey(job.id, "final")];
+        const liveTikTokStatus = tiktokStatusResults[job.id];
+        const displayedTikTokStatus = liveTikTokStatus?.status || job.tiktokPublishStatus || (job.tiktokPublishId ? "PROCESSING" : null);
+        const displayedTikTokError = liveTikTokStatus?.failReason || liveTikTokStatus?.error || job.tiktokPublishError;
+        const displayedTikTokRaw = liveTikTokStatus?.statusResponse || liveTikTokStatus?.raw || job.tiktokStatusResponse || job.tiktokInitResponse;
 
         return (
           <Card key={job.id}>
@@ -688,6 +782,19 @@ export function JobsList() {
                           ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                           : <Share2 className="w-4 h-4 mr-1" />}
                         {tiktokStatusQuery.data?.connected ? "TikTok" : "Connect"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => checkTikTokStatusMutation.mutate(job.id)}
+                        disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
+                        data-testid={`button-tiktok-status-${job.id}`}
+                        title={job.tiktokPublishId ? "Check TikTok publish status" : "No TikTok publish ID yet"}
+                      >
+                        {checkTikTokStatusMutation.isPending
+                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          : <Clock className="w-4 h-4 mr-1" />}
+                        Status
                       </Button>
                     </>
                   )}
@@ -918,6 +1025,63 @@ export function JobsList() {
                   )}
                 </div>
               )}
+
+              {job.status === "done" && job.finalVideoKey && (job.tiktokPublishId || liveTikTokStatus) && (
+                <div className="rounded-md border bg-muted/30 p-3 space-y-3" data-testid={`tiktok-debug-${job.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Share2 className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">TikTok Debug</span>
+                      {displayedTikTokStatus && (
+                        <Badge
+                          variant={
+                            displayedTikTokStatus === "PUBLISHED"
+                              ? "default"
+                              : displayedTikTokStatus === "FAILED" || displayedTikTokStatus === "REJECTED"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                        >
+                          {displayedTikTokStatus}
+                        </Badge>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => checkTikTokStatusMutation.mutate(job.id)}
+                      disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
+                      data-testid={`button-tiktok-status-panel-${job.id}`}
+                    >
+                      {checkTikTokStatusMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Clock className="w-3.5 h-3.5 mr-1" />}
+                      Check TikTok Status
+                    </Button>
+                  </div>
+                  <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                    <div><span className="font-medium text-foreground">publish_id:</span> {liveTikTokStatus?.publishId || job.tiktokPublishId || "none"}</div>
+                    <div><span className="font-medium text-foreground">mode:</span> {job.tiktokPostMode || "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD"}</div>
+                    <div><span className="font-medium text-foreground">scope:</span> video.publish direct post</div>
+                    <div><span className="font-medium text-foreground">privacy:</span> {job.tiktokPrivacyLevel || "SELF_ONLY"}</div>
+                    <div><span className="font-medium text-foreground">creator:</span> {job.tiktokCreatorNickname || tiktokStatusQuery.data?.creatorNickname || "unknown"}</div>
+                    <div><span className="font-medium text-foreground">username:</span> {job.tiktokCreatorUsername || tiktokStatusQuery.data?.creatorUsername || "unknown"}</div>
+                    <div><span className="font-medium text-foreground">open_id:</span> {liveTikTokStatus?.openId || job.tiktokOpenId || tiktokStatusQuery.data?.openId || "unknown"}</div>
+                    <div><span className="font-medium text-foreground">token fingerprint:</span> {liveTikTokStatus?.accessTokenFingerprint || job.tiktokAccessTokenFingerprint || tiktokStatusQuery.data?.accessTokenFingerprint || "unknown"}</div>
+                  </div>
+                  {displayedTikTokError && (
+                    <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+                      {displayedTikTokError}
+                    </div>
+                  )}
+                  {displayedTikTokRaw && (
+                    <details className="rounded-md border bg-background/60 p-2 text-xs">
+                      <summary className="cursor-pointer font-medium">Raw TikTok response</summary>
+                      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(displayedTikTokRaw, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         );
@@ -974,6 +1138,12 @@ export function JobsList() {
               Post privacy: Private/Self only
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
+              Posting as: {tiktokStatusQuery.data?.creatorNickname || "unknown"} @{tiktokStatusQuery.data?.creatorUsername || "unknown"}
+            </div>
+            <div className="mt-1 break-all text-xs text-muted-foreground">
+              open_id: {tiktokStatusQuery.data?.openId || "unknown"} • token: {tiktokStatusQuery.data?.accessTokenFingerprint || "unknown"}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
               Testing requirement: TikTok account privacy must be Private until app audit is approved.
             </div>
           </div>
@@ -1016,6 +1186,14 @@ export function JobsList() {
                   <div>{tiktokPublishStatus.message}</div>
                   {tiktokPublishStatus.publishId && (
                     <div className="text-xs opacity-80">Publish ID: {tiktokPublishStatus.publishId}</div>
+                  )}
+                  {tiktokPublishStatus.raw && (
+                    <details className="mt-2 rounded border bg-background/60 p-2 text-xs">
+                      <summary className="cursor-pointer font-medium">Raw TikTok response</summary>
+                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(tiktokPublishStatus.raw, null, 2)}
+                      </pre>
+                    </details>
                   )}
                 </div>
               </div>

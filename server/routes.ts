@@ -18,7 +18,7 @@ import path from "path";
 import fs from "fs";
 import OpenAI from "openai";
 import { spawn } from "child_process";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import ffmpegStatic from "ffmpeg-static";
 import { sanitizeNarrationScript } from "@shared/script-cleaner";
 import { logMemory, withHeavyWork } from "./heavy-work";
@@ -73,6 +73,7 @@ const TIKTOK_SCOPES = ["user.info.basic", "video.publish"];
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
 const TIKTOK_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
+const TIKTOK_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
 const TIKTOK_CLIENT_KEY_ENV_NAMES = ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_ID", "TIKTOK_APP_ID"];
 const TIKTOK_CLIENT_SECRET_ENV_NAMES = ["TIKTOK_CLIENT_SECRET", "TIKTOK_CLIENT_SECRET_KEY", "TIKTOK_SECRET_KEY", "TIKTOK_APP_SECRET"];
 const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] || "" : value || "";
@@ -236,6 +237,55 @@ const tikTokErrorMessage = (data: any, fallback: string) => (
   || data?.error
   || fallback
 );
+
+const tiktokTokenFingerprint = (token: string) => (
+  createHash("sha256").update(token).digest("hex").slice(0, 12)
+);
+
+const summarizeTikTokRaw = (data: any) => ({
+  publish_id: data?.data?.publish_id ?? data?.publish_id ?? null,
+  status: data?.data?.status ?? null,
+  fail_reason: data?.data?.fail_reason ?? null,
+  error_code: data?.error?.code ?? null,
+  error_message: data?.error?.message ?? null,
+  log_id: data?.error?.log_id ?? data?.error?.logid ?? data?.log_id ?? data?.logid ?? null,
+  request_id: data?.request_id ?? data?.error?.request_id ?? null,
+});
+
+const normalizeTikTokPublishStatus = (rawStatus?: unknown) => {
+  const status = typeof rawStatus === "string" ? rawStatus : "";
+  if (status === "PUBLISH_COMPLETE") return "PUBLISHED";
+  if (status === "FAILED") return "FAILED";
+  if (status === "REJECTED") return "REJECTED";
+  if (status.startsWith("PROCESSING") || status === "SEND_TO_USER_INBOX") return "PROCESSING";
+  return "UNKNOWN";
+};
+
+const fetchTikTokCreatorInfo = async (accessToken: string) => {
+  const creatorRes = await fetch(TIKTOK_CREATOR_INFO_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+    },
+    body: JSON.stringify({}),
+  });
+  const creatorData: any = await readJson(creatorRes);
+  return { response: creatorRes, data: creatorData };
+};
+
+const fetchTikTokPublishStatus = async (accessToken: string, publishId: string) => {
+  const statusRes = await fetch(TIKTOK_STATUS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+    },
+    body: JSON.stringify({ publish_id: publishId }),
+  });
+  const statusData: any = await readJson(statusRes);
+  return { response: statusRes, data: statusData };
+};
 
 const publishJobToTikTokSchema = z.object({
   title: z.string().trim().max(2200).optional(),
@@ -711,8 +761,19 @@ export async function registerRoutes(
 
   app.get("/api/tiktok/status", requireAuth, async (req, res) => {
     try {
-      const connection = await getTikTokConnection(req.user!.id);
+      const connection = await getActiveTikTokConnection(req.user!.id);
       const configStatus = getTikTokConfigStatus();
+      let creatorInfo: any = null;
+      let creatorInfoError: any = null;
+      if (connection) {
+        const creator = await fetchTikTokCreatorInfo(connection.accessToken).catch((err) => ({ error: err }));
+        if ("data" in creator) {
+          creatorInfo = creator.data;
+          if (!creator.response.ok || creator.data?.error?.code !== "ok") creatorInfoError = creator.data;
+        } else {
+          creatorInfoError = { message: creator.error?.message || "Unable to load TikTok creator info" };
+        }
+      }
       res.json({
         connected: Boolean(connection),
         ...configStatus,
@@ -720,6 +781,12 @@ export async function registerRoutes(
         openId: connection?.openId,
         scope: connection?.scope,
         expiresAt: connection?.accessTokenExpiresAt?.toISOString(),
+        accessTokenFingerprint: connection ? tiktokTokenFingerprint(connection.accessToken) : null,
+        creatorUsername: creatorInfo?.data?.creator_username ?? null,
+        creatorNickname: creatorInfo?.data?.creator_nickname ?? null,
+        privacyLevelOptions: creatorInfo?.data?.privacy_level_options ?? null,
+        creatorInfo,
+        creatorInfoError,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Unable to load TikTok status" });
@@ -739,16 +806,8 @@ export async function registerRoutes(
     try {
       const connection = await getActiveTikTokConnection(req.user!.id);
       if (!connection) return res.status(404).json({ error: "TikTok is not connected" });
-      const creatorRes = await fetch(TIKTOK_CREATOR_INFO_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${connection.accessToken}`,
-          "Content-Type": "application/json; charset=UTF-8",
-        },
-        body: JSON.stringify({}),
-      });
-      const data: any = await readJson(creatorRes);
-      if (!creatorRes.ok || data.error?.code) {
+      const { response: creatorRes, data } = await fetchTikTokCreatorInfo(connection.accessToken);
+      if (!creatorRes.ok || data.error?.code !== "ok") {
         return res.status(creatorRes.status || 500).json({ error: tikTokErrorMessage(data, "Unable to load TikTok creator info"), details: data });
       }
       res.json(data);
@@ -1750,19 +1809,21 @@ export async function registerRoutes(
 
       const connection = await getActiveTikTokConnection(req.user!.id);
       if (!connection) return res.status(404).json({ error: "Connect TikTok first in Settings" });
+      const accessTokenFingerprint = tiktokTokenFingerprint(connection.accessToken);
 
-      const creatorRes = await fetch(TIKTOK_CREATOR_INFO_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${connection.accessToken}`,
-          "Content-Type": "application/json; charset=UTF-8",
-        },
-        body: JSON.stringify({}),
+      const { response: creatorRes, data: creatorData } = await fetchTikTokCreatorInfo(connection.accessToken);
+      await storage.updateJob(job.id, {
+        tiktokOpenId: connection.openId,
+        tiktokCreatorUsername: creatorData?.data?.creator_username || null,
+        tiktokCreatorNickname: creatorData?.data?.creator_nickname || null,
+        tiktokAccessTokenFingerprint: accessTokenFingerprint,
+        tiktokCreatorInfo: creatorData,
+        tiktokPostMode: "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD",
       });
-      const creatorData: any = await readJson(creatorRes);
       if (!creatorRes.ok || creatorData.error?.code !== "ok") {
         return res.status(creatorRes.status || 500).json({
           error: tikTokErrorMessage(creatorData, "Unable to verify TikTok creator posting options"),
+          raw: summarizeTikTokRaw(creatorData),
           details: creatorData,
         });
       }
@@ -1774,6 +1835,7 @@ export async function registerRoutes(
       if (!privacyOptions.includes(privacyLevel)) {
         return res.status(400).json({
           error: `TikTok account does not allow ${privacyLevel}. Available options: ${privacyOptions.join(", ") || "none"}.`,
+          raw: summarizeTikTokRaw(creatorData),
           details: creatorData,
         });
       }
@@ -1813,14 +1875,52 @@ export async function registerRoutes(
       });
       const initData: any = await readJson(initRes);
       if (!initRes.ok || initData.error?.code) {
-        return res.status(initRes.status || 500).json({ error: tikTokErrorMessage(initData, "TikTok publish init failed"), details: initData });
+        await storage.updateJob(job.id, {
+          tiktokPublishStatus: "FAILED",
+          tiktokPublishError: tikTokErrorMessage(initData, "TikTok publish init failed"),
+          tiktokPrivacyLevel: privacyLevel,
+          tiktokInitResponse: initData,
+          tiktokOpenId: connection.openId,
+          tiktokCreatorUsername: creatorData?.data?.creator_username || null,
+          tiktokCreatorNickname: creatorData?.data?.creator_nickname || null,
+          tiktokAccessTokenFingerprint: accessTokenFingerprint,
+          tiktokCreatorInfo: creatorData,
+          tiktokPostMode: "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD",
+        });
+        return res.status(initRes.status || 500).json({ error: tikTokErrorMessage(initData, "TikTok publish init failed"), raw: summarizeTikTokRaw(initData), details: initData });
       }
 
       const uploadUrl = initData?.data?.upload_url;
       const publishId = initData?.data?.publish_id;
       if (!uploadUrl || !publishId) {
-        return res.status(500).json({ error: "TikTok did not return an upload URL", details: initData });
+        await storage.updateJob(job.id, {
+          tiktokPublishStatus: "FAILED",
+          tiktokPublishError: "TikTok did not return an upload URL",
+          tiktokPrivacyLevel: privacyLevel,
+          tiktokInitResponse: initData,
+          tiktokOpenId: connection.openId,
+          tiktokCreatorUsername: creatorData?.data?.creator_username || null,
+          tiktokCreatorNickname: creatorData?.data?.creator_nickname || null,
+          tiktokAccessTokenFingerprint: accessTokenFingerprint,
+          tiktokCreatorInfo: creatorData,
+          tiktokPostMode: "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD",
+        });
+        return res.status(500).json({ error: "TikTok did not return an upload URL", raw: summarizeTikTokRaw(initData), details: initData });
       }
+
+      await storage.updateJob(job.id, {
+        tiktokPublishId: publishId,
+        tiktokPublishStatus: "PROCESSING",
+        tiktokPublishError: null,
+        tiktokPrivacyLevel: privacyLevel,
+        tiktokPostMode: "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD",
+        tiktokOpenId: connection.openId,
+        tiktokCreatorUsername: creatorData?.data?.creator_username || null,
+        tiktokCreatorNickname: creatorData?.data?.creator_nickname || null,
+        tiktokAccessTokenFingerprint: accessTokenFingerprint,
+        tiktokInitResponse: initData,
+        tiktokCreatorInfo: creatorData,
+      });
 
       const uploadRes = await fetch(uploadUrl, {
         method: "PUT",
@@ -1833,17 +1933,95 @@ export async function registerRoutes(
       });
       if (!uploadRes.ok) {
         const uploadBody = await uploadRes.text().catch(() => "");
+        await storage.updateJob(job.id, {
+          tiktokPublishStatus: "FAILED",
+          tiktokPublishError: `TikTok video upload failed (${uploadRes.status}) ${uploadBody.slice(0, 500)}`,
+        });
         return res.status(uploadRes.status || 500).json({
           error: `TikTok video upload failed (${uploadRes.status})`,
+          raw: {
+            publish_id: publishId,
+            upload_status: uploadRes.status,
+            upload_response: uploadBody.slice(0, 1000),
+          },
           details: uploadBody.slice(0, 1000),
         });
       }
 
       await storage.appendJobLog(job.id, `Published to TikTok direct post queue. Publish ID: ${publishId}`);
-      res.json({ publishId, privacyLevel, title });
+      res.json({
+        publishId,
+        privacyLevel,
+        title,
+        status: "PROCESSING",
+        postMode: "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD",
+        scope: "video.publish",
+        openId: connection.openId,
+        creatorUsername: creatorData?.data?.creator_username || null,
+        creatorNickname: creatorData?.data?.creator_nickname || null,
+        accessTokenFingerprint,
+        raw: summarizeTikTokRaw(initData),
+        initResponse: initData,
+      });
     } catch (err: any) {
       console.error("[tiktok] publish failed:", err);
       res.status(500).json({ error: err.message || "TikTok publish failed" });
+    }
+  });
+
+  app.post("/api/jobs/:id/tiktok/status", requireAuth, async (req, res) => {
+    try {
+      const job = await storage.getJob(routeParamInt(req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      if (!canAccessUserOwnedRecord(req.user!, job.userId)) return res.status(403).json({ error: "Forbidden" });
+      if (!job.tiktokPublishId) return res.status(400).json({ error: "No TikTok publish_id saved for this job yet" });
+
+      const connection = await getActiveTikTokConnection(req.user!.id);
+      if (!connection) return res.status(404).json({ error: "Connect TikTok first in Settings" });
+
+      const accessTokenFingerprint = tiktokTokenFingerprint(connection.accessToken);
+      const { response: statusRes, data: statusData } = await fetchTikTokPublishStatus(connection.accessToken, job.tiktokPublishId);
+      const raw = summarizeTikTokRaw(statusData);
+      const normalizedStatus = statusData?.error?.code === "ok"
+        ? normalizeTikTokPublishStatus(statusData?.data?.status)
+        : "UNKNOWN";
+      const errorReason = normalizedStatus === "FAILED" || normalizedStatus === "REJECTED" || statusData?.error?.code !== "ok"
+        ? (statusData?.data?.fail_reason || tikTokErrorMessage(statusData, "TikTok status check failed"))
+        : null;
+
+      await storage.updateJob(job.id, {
+        tiktokPublishStatus: normalizedStatus,
+        tiktokPublishError: errorReason,
+        tiktokStatusResponse: statusData,
+        tiktokOpenId: connection.openId,
+        tiktokAccessTokenFingerprint: accessTokenFingerprint,
+      });
+
+      if (!statusRes.ok || statusData?.error?.code !== "ok") {
+        return res.status(statusRes.status || 500).json({
+          status: normalizedStatus,
+          error: errorReason || "TikTok status check failed",
+          publishId: job.tiktokPublishId,
+          openId: connection.openId,
+          accessTokenFingerprint,
+          raw,
+          statusResponse: statusData,
+        });
+      }
+
+      res.json({
+        status: normalizedStatus,
+        tiktokStatus: statusData?.data?.status || null,
+        failReason: statusData?.data?.fail_reason || null,
+        publishId: job.tiktokPublishId,
+        openId: connection.openId,
+        accessTokenFingerprint,
+        raw,
+        statusResponse: statusData,
+      });
+    } catch (err: any) {
+      console.error("[tiktok] status check failed:", err);
+      res.status(500).json({ error: err.message || "TikTok status check failed" });
     }
   });
 

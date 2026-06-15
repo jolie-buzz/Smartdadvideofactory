@@ -206,6 +206,18 @@ async function seedAdmin() {
     await db.execute(
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS script_duration_sec INTEGER NOT NULL DEFAULT 60` as any
     );
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_id TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_status TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_error TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_privacy_level TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_post_mode TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_open_id TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_creator_username TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_creator_nickname TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_access_token_fingerprint TEXT` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_init_response JSONB` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_status_response JSONB` as any);
+    await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_creator_info JSONB` as any);
     await db.execute(
       `CREATE TABLE IF NOT EXISTS tiktok_connections (
         id SERIAL PRIMARY KEY,

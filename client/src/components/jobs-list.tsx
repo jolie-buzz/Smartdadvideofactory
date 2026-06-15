@@ -207,8 +207,9 @@ function VideoPreview({ jobId }: { jobId: number }) {
         onClick={openPreview}
         disabled={loading}
         data-testid={`button-preview-${jobId}`}
+        className="gap-1.5 max-sm:w-full"
       >
-        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Eye className="w-4 h-4 mr-1" />}
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
         Preview
       </Button>
       {open && videoUrl && (
@@ -678,11 +679,11 @@ export function JobsList() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-2">
+    <div className="mx-auto w-full max-w-2xl min-w-0 space-y-4 overflow-x-clip">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold">Production Jobs</h2>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 rounded-md border px-2 py-1">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+          <div className="col-span-2 flex items-center justify-between gap-2 rounded-md border px-3 py-2 sm:col-span-1 sm:justify-start sm:px-2 sm:py-1">
             <Label htmlFor="auto-download-jobs" className="text-xs text-muted-foreground">
               Auto Download
             </Label>
@@ -694,12 +695,12 @@ export function JobsList() {
             />
           </div>
           {hasActiveJobs && (
-            <Badge variant="secondary" className="animate-pulse">
+            <Badge variant="secondary" className="justify-center animate-pulse">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
               Processing
             </Badge>
           )}
-          <Badge variant="secondary">{jobsQuery.data.length} job{jobsQuery.data.length !== 1 ? "s" : ""}</Badge>
+          <Badge variant="secondary" className="justify-center">{jobsQuery.data.length} job{jobsQuery.data.length !== 1 ? "s" : ""}</Badge>
           <Button
             variant="outline"
             size="sm"
@@ -728,20 +729,20 @@ export function JobsList() {
 
         return (
           <Card key={job.id}>
-            <CardContent className="p-5 space-y-3">
-              <div className="flex items-start justify-between gap-3">
+            <CardContent className="space-y-3 p-3 sm:p-5">
+              <div className="grid gap-3 sm:flex sm:items-start sm:justify-between">
                 <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-medium" data-testid={`text-job-name-${job.id}`}>
+                  <div className="min-w-0 space-y-1 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:space-y-0">
+                    <h3 className="font-medium leading-tight" data-testid={`text-job-name-${job.id}`}>
                       Job #{job.id}
                     </h3>
                     {job.assetName && (
-                      <span className="text-sm text-muted-foreground">
+                      <span className="block break-words text-sm text-muted-foreground sm:inline">
                         &mdash; {job.assetName}
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge
                       variant={config.color as any}
                       data-testid={`badge-status-${job.id}`}
@@ -755,7 +756,7 @@ export function JobsList() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:items-center sm:justify-end sm:gap-1 [&>button]:min-w-0 max-sm:[&>button]:w-full max-sm:[&>button]:justify-center">
                   {job.status === "done" && job.finalVideoKey && (
                     <>
                       <VideoPreview jobId={job.id} />
@@ -764,10 +765,11 @@ export function JobsList() {
                         onClick={() => handleDownload(job.id, "final")}
                         disabled={finalDownloadState?.status === "downloading"}
                         data-testid={`button-download-${job.id}`}
+                        className="gap-1.5"
                       >
                         {finalDownloadState?.status === "downloading"
-                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                          : <Download className="w-4 h-4 mr-1" />}
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Download className="w-4 h-4" />}
                         {finalDownloadState?.status === "downloading" ? "Downloading" : "Video"}
                       </Button>
                       <Button
@@ -777,10 +779,11 @@ export function JobsList() {
                         disabled={publishTikTokMutation.isPending || tiktokStatusQuery.isLoading || !tiktokStatusQuery.data?.configured}
                         data-testid={`button-tiktok-publish-${job.id}`}
                         title={tiktokStatusQuery.data?.connected ? "Post to TikTok" : "Connect TikTok"}
+                        className="gap-1.5"
                       >
                         {publishTikTokMutation.isPending
-                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                          : <Share2 className="w-4 h-4 mr-1" />}
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Share2 className="w-4 h-4" />}
                         {tiktokStatusQuery.data?.connected ? "TikTok" : "Connect"}
                       </Button>
                       <Button
@@ -790,10 +793,11 @@ export function JobsList() {
                         disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
                         data-testid={`button-tiktok-status-${job.id}`}
                         title={job.tiktokPublishId ? "Check TikTok publish status" : "No TikTok publish ID yet"}
+                        className="gap-1.5"
                       >
                         {checkTikTokStatusMutation.isPending
-                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                          : <Clock className="w-4 h-4 mr-1" />}
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Clock className="w-4 h-4" />}
                         Status
                       </Button>
                     </>
@@ -805,6 +809,7 @@ export function JobsList() {
                       variant="secondary"
                       onClick={() => toggleExpanded(job.id)}
                       data-testid={`button-expand-${job.id}`}
+                      className="max-sm:w-full"
                     >
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </Button>
@@ -829,6 +834,7 @@ export function JobsList() {
                     disabled={deleteJobMutation.isPending}
                     data-testid={`button-delete-job-${job.id}`}
                     title="Delete job"
+                    className="max-sm:w-full"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -995,7 +1001,7 @@ export function JobsList() {
               )}
 
               {job.status === "done" && job.finalVideoKey && (
-                <div className="flex items-center justify-between pt-2 border-t">
+                <div className="flex flex-col gap-3 pt-2 border-t sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
                     <Share2 className="w-4 h-4 text-muted-foreground" />
                     <Label htmlFor={`share-${job.id}`} className="text-sm">
@@ -1014,6 +1020,7 @@ export function JobsList() {
                       variant="secondary"
                       onClick={() => copyShareLink(job.shareToken!)}
                       data-testid={`button-copy-share-${job.id}`}
+                      className="max-sm:w-full"
                     >
                       {copiedToken === job.shareToken ? (
                         <Check className="w-4 h-4 mr-1" />
@@ -1052,20 +1059,21 @@ export function JobsList() {
                       onClick={() => checkTikTokStatusMutation.mutate(job.id)}
                       disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
                       data-testid={`button-tiktok-status-panel-${job.id}`}
+                      className="max-sm:w-full"
                     >
                       {checkTikTokStatusMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Clock className="w-3.5 h-3.5 mr-1" />}
                       Check TikTok Status
                     </Button>
                   </div>
                   <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div><span className="font-medium text-foreground">publish_id:</span> {liveTikTokStatus?.publishId || job.tiktokPublishId || "none"}</div>
-                    <div><span className="font-medium text-foreground">mode:</span> {job.tiktokPostMode || "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD"}</div>
-                    <div><span className="font-medium text-foreground">scope:</span> video.publish direct post</div>
-                    <div><span className="font-medium text-foreground">privacy:</span> {job.tiktokPrivacyLevel || "SELF_ONLY"}</div>
-                    <div><span className="font-medium text-foreground">creator:</span> {job.tiktokCreatorNickname || tiktokStatusQuery.data?.creatorNickname || "unknown"}</div>
-                    <div><span className="font-medium text-foreground">username:</span> {job.tiktokCreatorUsername || tiktokStatusQuery.data?.creatorUsername || "unknown"}</div>
-                    <div><span className="font-medium text-foreground">open_id:</span> {liveTikTokStatus?.openId || job.tiktokOpenId || tiktokStatusQuery.data?.openId || "unknown"}</div>
-                    <div><span className="font-medium text-foreground">token fingerprint:</span> {liveTikTokStatus?.accessTokenFingerprint || job.tiktokAccessTokenFingerprint || tiktokStatusQuery.data?.accessTokenFingerprint || "unknown"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">publish_id:</span> {liveTikTokStatus?.publishId || job.tiktokPublishId || "none"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">mode:</span> {job.tiktokPostMode || "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">scope:</span> video.publish direct post</div>
+                    <div className="break-all"><span className="font-medium text-foreground">privacy:</span> {job.tiktokPrivacyLevel || "SELF_ONLY"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">creator:</span> {job.tiktokCreatorNickname || tiktokStatusQuery.data?.creatorNickname || "unknown"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">username:</span> {job.tiktokCreatorUsername || tiktokStatusQuery.data?.creatorUsername || "unknown"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">open_id:</span> {liveTikTokStatus?.openId || job.tiktokOpenId || tiktokStatusQuery.data?.openId || "unknown"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">token fingerprint:</span> {liveTikTokStatus?.accessTokenFingerprint || job.tiktokAccessTokenFingerprint || tiktokStatusQuery.data?.accessTokenFingerprint || "unknown"}</div>
                   </div>
                   {displayedTikTokError && (
                     <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">

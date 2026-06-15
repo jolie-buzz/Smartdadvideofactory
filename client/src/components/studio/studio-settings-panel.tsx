@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, KeyRound, Loader2, LogOut, Music, Pencil, Plus, Shield, Sparkles, Trash2, Upload, User, X } from "lucide-react";
+import { Check, KeyRound, Loader2, LogOut, Music, Pencil, Plus, Send, Shield, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { invalidateAssetsCache, queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +30,15 @@ type AdminGeneralPrompts = {
   hookPrompt: string;
   captionPrompt: string;
   seoPrompt: string;
+};
+
+type TikTokStatus = {
+  connected: boolean;
+  configured: boolean;
+  redirectUri: string;
+  openId?: string;
+  scope?: string;
+  expiresAt?: string;
 };
 
 async function uploadMusicWithProgress(
@@ -111,6 +120,10 @@ export function StudioSettingsPanel() {
   const adminPromptsQuery = useQuery<AdminGeneralPrompts>({
     queryKey: ["/api/admin/general-prompts"],
     enabled: user?.role === "admin",
+  });
+
+  const tiktokStatusQuery = useQuery<TikTokStatus>({
+    queryKey: ["/api/tiktok/status"],
   });
 
   useEffect(() => {
@@ -253,6 +266,19 @@ export function StudioSettingsPanel() {
     },
   });
 
+  const disconnectTikTokMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", "/api/tiktok/connection");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tiktok/status"] });
+      toast({ title: "TikTok disconnected", description: "This Buzzly account is no longer linked to TikTok." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "TikTok disconnect failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <>
       <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -286,6 +312,79 @@ export function StudioSettingsPanel() {
                 <LogOut className="h-4 w-4" />
                 Sign Out
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5" />
+              TikTok Connection
+            </CardTitle>
+            <CardDescription>
+              Connect Login Kit and direct posting for completed Buzzly videos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 p-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {tiktokStatusQuery.isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : tiktokStatusQuery.data?.connected ? (
+                    <Check className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  {tiktokStatusQuery.data?.connected ? "Connected" : "Not connected"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {tiktokStatusQuery.data?.connected
+                    ? `Authorized scopes: ${tiktokStatusQuery.data.scope || "TikTok posting"}`
+                    : tiktokStatusQuery.data?.configured
+                      ? "Ready to authorize this Buzzly account with TikTok."
+                      : "Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET in production before connecting."}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tiktokStatusQuery.data?.connected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => disconnectTikTokMutation.mutate()}
+                    disabled={disconnectTikTokMutation.isPending}
+                    data-testid="button-disconnect-tiktok"
+                  >
+                    {disconnectTikTokMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    className="gap-2"
+                    onClick={() => { window.location.href = "/api/auth/tiktok"; }}
+                    disabled={tiktokStatusQuery.isLoading || !tiktokStatusQuery.data?.configured}
+                    data-testid="button-connect-tiktok"
+                  >
+                    <Send className="h-4 w-4" />
+                    Connect TikTok
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tiktok-redirect-uri">TikTok OAuth redirect URI</Label>
+              <Input
+                id="tiktok-redirect-uri"
+                value={tiktokStatusQuery.data?.redirectUri || "https://buzzly.brandbuzzer.net/api/auth/tiktok/callback"}
+                readOnly
+                data-testid="input-tiktok-redirect-uri"
+              />
+              <p className="text-xs text-muted-foreground">
+                Register this exact URL in TikTok Developer Portal under Login Kit.
+              </p>
             </div>
           </CardContent>
         </Card>

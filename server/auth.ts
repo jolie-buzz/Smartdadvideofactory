@@ -206,6 +206,23 @@ async function seedAdmin() {
     await db.execute(
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS script_duration_sec INTEGER NOT NULL DEFAULT 60` as any
     );
+    await db.execute(
+      `CREATE TABLE IF NOT EXISTS tiktok_connections (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        open_id TEXT NOT NULL,
+        scope TEXT NOT NULL DEFAULT '',
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        access_token_expires_at TIMESTAMP NOT NULL,
+        refresh_token_expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )` as any
+    );
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_connections_user_id_unique ON tiktok_connections(user_id)` as any
+    );
   } catch (err) {
     // columns may already exist, ignore
   }

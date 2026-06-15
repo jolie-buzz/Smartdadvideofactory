@@ -63,6 +63,11 @@ type DownloadState = {
   label: string;
 };
 
+type TikTokStatus = {
+  connected: boolean;
+  configured: boolean;
+};
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {
   queued: { label: "Queued", color: "secondary", icon: Clock, progress: 5 },
   building_video: { label: "Building Video", color: "secondary", icon: Film, progress: 10 },
@@ -283,6 +288,10 @@ export function JobsList() {
     refetchInterval: 3000,
   });
 
+  const tiktokStatusQuery = useQuery<TikTokStatus>({
+    queryKey: ["/api/tiktok/status"],
+  });
+
   const hasActiveJobs = jobsQuery.data?.some(
     (j) => !["done", "failed", "stopped"].includes(j.status)
   );
@@ -443,6 +452,38 @@ export function JobsList() {
     },
   });
 
+  const publishTikTokMutation = useMutation({
+    mutationFn: async (job: JobWithAsset) => {
+      const res = await apiRequest("POST", `/api/jobs/${job.id}/tiktok/publish`, {
+        title: job.captionText || job.assetName || `Buzzly video ${job.id}`,
+        privacyLevel: "SELF_ONLY",
+        brandContentToggle: false,
+        brandOrganicToggle: true,
+        isAigc: true,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({
+        title: "Sent to TikTok",
+        description: `TikTok publish ID: ${data.publishId}`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "TikTok publish failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleTikTokPublish = (job: JobWithAsset) => {
+    if (!tiktokStatusQuery.data?.connected) {
+      window.location.href = "/api/auth/tiktok";
+      return;
+    }
+    const ok = window.confirm("Post this completed video to TikTok as SELF_ONLY/private?");
+    if (ok) publishTikTokMutation.mutate(job);
+  };
+
   const copyShareLink = async (token: string) => {
     const url = `${window.location.origin}/s/${token}`;
     try {
@@ -591,6 +632,19 @@ export function JobsList() {
                           ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                           : <Download className="w-4 h-4 mr-1" />}
                         {finalDownloadState?.status === "downloading" ? "Downloading" : "Video"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleTikTokPublish(job)}
+                        disabled={publishTikTokMutation.isPending || tiktokStatusQuery.isLoading || !tiktokStatusQuery.data?.configured}
+                        data-testid={`button-tiktok-publish-${job.id}`}
+                        title={tiktokStatusQuery.data?.connected ? "Post to TikTok" : "Connect TikTok"}
+                      >
+                        {publishTikTokMutation.isPending
+                          ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                          : <Share2 className="w-4 h-4 mr-1" />}
+                        {tiktokStatusQuery.data?.connected ? "TikTok" : "Connect"}
                       </Button>
                     </>
                   )}

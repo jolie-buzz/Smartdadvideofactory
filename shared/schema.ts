@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb, varchar, json, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, boolean, jsonb, varchar, json, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -79,6 +79,21 @@ export const jobs = pgTable("jobs", {
   logs: text("logs").notNull().default(""),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
+
+export const tiktokConnections = pgTable("tiktok_connections", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  openId: text("open_id").notNull(),
+  scope: text("scope").notNull().default(""),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  accessTokenExpiresAt: timestamp("access_token_expires_at").notNull(),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  uniqueIndex("idx_tiktok_connections_user_id_unique").on(table.userId),
+]);
 
 export const shots = pgTable("shots", {
   id: serial("id").primaryKey(),
@@ -168,6 +183,7 @@ export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = typeof assets.$inferInsert;
 export type Job = typeof jobs.$inferSelect;
 export type InsertJob = z.infer<typeof insertJobSchema>;
+export type TikTokConnection = typeof tiktokConnections.$inferSelect;
 export type Shot = typeof shots.$inferSelect;
 export type InsertShot = z.infer<typeof insertShotSchema>;
 export type VideoAnalysis = typeof videoAnalyses.$inferSelect;

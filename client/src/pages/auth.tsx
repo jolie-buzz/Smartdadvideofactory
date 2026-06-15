@@ -3,15 +3,26 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LogIn, UserPlus, CheckCircle, Clock } from "lucide-react";
+import { LogIn, UserPlus, Clock, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+
+type TikTokAuthConfig = {
+  configured: boolean;
+  hasClientKey: boolean;
+  hasClientSecret: boolean;
+};
 
 export default function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [registered, setRegistered] = useState(false);
   const { login, register } = useAuth();
   const { toast } = useToast();
+
+  const tiktokConfigQuery = useQuery<TikTokAuthConfig>({
+    queryKey: ["/api/auth/tiktok/config"],
+  });
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -107,6 +118,27 @@ export default function AuthPage() {
         <CardContent>
           {mode === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2"
+                disabled={tiktokConfigQuery.isLoading || !tiktokConfigQuery.data?.configured}
+                onClick={() => { window.location.href = "/api/auth/tiktok/login"; }}
+                data-testid="button-login-tiktok"
+              >
+                <Send className="w-4 h-4" />
+                Continue with TikTok
+              </Button>
+              {!tiktokConfigQuery.isLoading && !tiktokConfigQuery.data?.configured && (
+                <p className="text-center text-xs text-muted-foreground">
+                  TikTok login is not configured yet.
+                </p>
+              )}
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">or</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <Input

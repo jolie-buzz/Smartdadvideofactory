@@ -272,6 +272,7 @@ export function JobsList() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [pendingTikTokJob, setPendingTikTokJob] = useState<JobWithAsset | null>(null);
   const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
@@ -467,6 +468,7 @@ export function JobsList() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setPendingTikTokJob(null);
       toast({
         title: "Sent to TikTok",
         description: `TikTok publish ID: ${data.publishId}`,
@@ -482,8 +484,7 @@ export function JobsList() {
       window.location.href = "/api/auth/tiktok";
       return;
     }
-    const ok = window.confirm("Post this completed video to TikTok as SELF_ONLY/private?");
-    if (ok) publishTikTokMutation.mutate(job);
+    setPendingTikTokJob(job);
   };
 
   const copyShareLink = async (token: string) => {
@@ -906,6 +907,44 @@ export function JobsList() {
               data-testid="button-confirm-clear-all"
             >
               {clearAllMutation.isPending ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Clearing...</> : "Yes, Clear All"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(pendingTikTokJob)} onOpenChange={(open) => {
+        if (!open && !publishTikTokMutation.isPending) setPendingTikTokJob(null);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Post to TikTok?</DialogTitle>
+            <DialogDescription>
+              This will send the completed video to TikTok as Private/Self only. You can review it in TikTok before making it public.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="font-medium">
+              {pendingTikTokJob?.assetName || `Job #${pendingTikTokJob?.id}`}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Privacy: Private/Self only
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setPendingTikTokJob(null)}
+              disabled={publishTikTokMutation.isPending}
+              data-testid="button-cancel-tiktok-publish"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => pendingTikTokJob && publishTikTokMutation.mutate(pendingTikTokJob)}
+              disabled={!pendingTikTokJob || publishTikTokMutation.isPending}
+              data-testid="button-confirm-tiktok-publish"
+            >
+              {publishTikTokMutation.isPending ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending...</> : "Post to TikTok"}
             </Button>
           </DialogFooter>
         </DialogContent>

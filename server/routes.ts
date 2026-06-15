@@ -548,7 +548,11 @@ export async function registerRoutes(
 
   configureR2Cors().catch(() => {});
 
-  app.get(["/tiktok-developers-site-verification", "/tiktok-developers-site-verification.txt"], (_req, res) => {
+  app.get([
+    "/tiktok-developers-site-verification",
+    "/tiktok-developers-site-verification.txt",
+    "/tiktokfdL9JsvstRAXcNNeOYNNYSBLyGe2YmlG.txt",
+  ], (_req, res) => {
     res.type("text/plain").send(TIKTOK_SITE_VERIFICATION);
   });
 

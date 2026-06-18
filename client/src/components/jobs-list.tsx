@@ -101,7 +101,10 @@ type TikTokJobStatusResult = {
   accessTokenFingerprint?: string | null;
   raw?: Record<string, unknown> | null;
   statusResponse?: Record<string, unknown> | null;
+  checkedAt?: string;
 };
+
+const TIKTOK_TERMINAL_STATUSES = new Set<TikTokJobStatusResult["status"]>(["PUBLISHED", "FAILED", "REJECTED"]);
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; progress: number }> = {
   queued: { label: "Queued", color: "secondary", icon: Clock, progress: 5 },
@@ -308,6 +311,8 @@ export function JobsList() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [pendingTikTokJob, setPendingTikTokJob] = useState<JobWithAsset | null>(null);
   const [tiktokCaption, setTikTokCaption] = useState("");
+  const [visibleTikTokRawJobs, setVisibleTikTokRawJobs] = useState<Set<number>>(new Set());
+  const [autoPollingTikTokJobs, setAutoPollingTikTokJobs] = useState<Set<number>>(new Set());
   const [tiktokPublishStatus, setTikTokPublishStatus] = useState<{
     state: "idle" | "sending" | "success" | "error";
     message?: string;
@@ -318,9 +323,19 @@ export function JobsList() {
   const [downloadStates, setDownloadStates] = useState<Record<string, DownloadState>>({});
   const [autoDownload, setAutoDownload] = useState(() => localStorage.getItem("buzzly.autoDownloadJobs") === "true");
   const autoDownloadedJobsRef = useRef<Set<number>>(new Set());
+  const activeTikTokPollsRef = useRef<Set<number>>(new Set());
 
   const toggleExpanded = (id: number) => {
     setExpandedJobs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleTikTokRaw = (id: number) => {
+    setVisibleTikTokRawJobs((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -499,6 +514,63 @@ export function JobsList() {
 
   const socialMediaCaption = (job: JobWithAsset) => job.captionText?.trim() || "";
 
+  const checkTikTokStatus = async (jobId: number, options?: { silent?: boolean }): Promise<TikTokJobStatusResult | null> => {
+    if (activeTikTokPollsRef.current.has(jobId)) return null;
+    activeTikTokPollsRef.current.add(jobId);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/tiktok/status`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      const result = {
+        ...(data as TikTokJobStatusResult),
+        checkedAt: new Date().toISOString(),
+      };
+      if (!res.ok) {
+        const err = new Error(data.error || `TikTok status check failed (${res.status})`) as Error & { payload?: any; jobId?: number };
+        err.payload = result;
+        err.jobId = jobId;
+        throw err;
+      }
+      setTikTokStatusResults((current) => ({ ...current, [jobId]: result }));
+      if (TIKTOK_TERMINAL_STATUSES.has(result.status)) {
+        setAutoPollingTikTokJobs((current) => {
+          const next = new Set(current);
+          next.delete(jobId);
+          return next;
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      if (!options?.silent) {
+        toast({ title: "TikTok status checked", description: `Status: ${result.status}` });
+      }
+      return result;
+    } catch (err: any) {
+      if (err.jobId) {
+        setTikTokStatusResults((current) => ({
+          ...current,
+          [err.jobId!]: {
+            status: err.payload?.status || "UNKNOWN",
+            error: err.message,
+            publishId: err.payload?.publishId || null,
+            openId: err.payload?.openId || null,
+            accessTokenFingerprint: err.payload?.accessTokenFingerprint || null,
+            raw: err.payload?.raw || null,
+            statusResponse: err.payload?.statusResponse || null,
+            checkedAt: new Date().toISOString(),
+          },
+        }));
+      }
+      if (!options?.silent) {
+        toast({ title: "TikTok status failed", description: err.message, variant: "destructive" });
+      }
+      return null;
+    } finally {
+      activeTikTokPollsRef.current.delete(jobId);
+    }
+  };
+
   const publishTikTokMutation = useMutation({
     mutationFn: async ({ job, title }: { job: JobWithAsset; title: string }) => {
       setTikTokPublishStatus({
@@ -534,21 +606,27 @@ export function JobsList() {
         raw: data.raw || data.initResponse || null,
       });
       if (pendingTikTokJob) {
+        const postedJobId = pendingTikTokJob.id;
         setTikTokStatusResults((current) => ({
           ...current,
-          [pendingTikTokJob.id]: {
+          [postedJobId]: {
             status: data.status || "PROCESSING",
             publishId: data.publishId,
             openId: data.openId,
             accessTokenFingerprint: data.accessTokenFingerprint,
             raw: data.raw || null,
             statusResponse: data.initResponse || null,
+            checkedAt: new Date().toISOString(),
           },
         }));
+        setAutoPollingTikTokJobs((current) => new Set(current).add(postedJobId));
+        window.setTimeout(() => {
+          checkTikTokStatus(postedJobId, { silent: true });
+        }, 1500);
       }
       toast({
         title: "TikTok upload accepted",
-        description: `Publish ID: ${data.publishId}`,
+        description: `Publish ID: ${data.publishId}. Auto-checking status every 10 seconds.`,
       });
     },
     onError: (err: Error & { payload?: any }) => {
@@ -561,42 +639,17 @@ export function JobsList() {
     },
   });
 
-  const checkTikTokStatusMutation = useMutation({
+  const checkTikTokStatusMutation = useMutation<
+    { jobId: number; data: TikTokJobStatusResult | null },
+    Error,
+    number
+  >({
     mutationFn: async (jobId: number) => {
-      const res = await fetch(`/api/jobs/${jobId}/tiktok/status`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = new Error(data.error || `TikTok status check failed (${res.status})`) as Error & { payload?: any; jobId?: number };
-        err.payload = data;
-        err.jobId = jobId;
-        throw err;
-      }
-      return { jobId, data: data as TikTokJobStatusResult };
+      const data = await checkTikTokStatus(jobId);
+      return { jobId, data };
     },
     onSuccess: ({ jobId, data }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
-      setTikTokStatusResults((current) => ({ ...current, [jobId]: data }));
-      toast({ title: "TikTok status checked", description: `Status: ${data.status}` });
-    },
-    onError: (err: Error & { payload?: any; jobId?: number }) => {
-      if (err.jobId) {
-        setTikTokStatusResults((current) => ({
-          ...current,
-          [err.jobId!]: {
-            status: err.payload?.status || "UNKNOWN",
-            error: err.message,
-            publishId: err.payload?.publishId || null,
-            openId: err.payload?.openId || null,
-            accessTokenFingerprint: err.payload?.accessTokenFingerprint || null,
-            raw: err.payload?.raw || null,
-            statusResponse: err.payload?.statusResponse || null,
-          },
-        }));
-      }
-      toast({ title: "TikTok status failed", description: err.message, variant: "destructive" });
+      if (data) setTikTokStatusResults((current) => ({ ...current, [jobId]: data }));
     },
   });
 
@@ -617,6 +670,37 @@ export function JobsList() {
     setTikTokCaption(socialMediaCaption(job));
     setTikTokPublishStatus({ state: "idle" });
   };
+
+  useEffect(() => {
+    if (!jobsQuery.data?.length) return;
+    setAutoPollingTikTokJobs((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const job of jobsQuery.data) {
+        const liveStatus = tiktokStatusResults[job.id]?.status;
+        const status = (liveStatus || job.tiktokPublishStatus || (job.tiktokPublishId ? "PROCESSING" : null)) as TikTokJobStatusResult["status"] | null;
+        if (job.tiktokPublishId && (!status || !TIKTOK_TERMINAL_STATUSES.has(status)) && !next.has(job.id)) {
+          next.add(job.id);
+          changed = true;
+        }
+        if (status && TIKTOK_TERMINAL_STATUSES.has(status) && next.has(job.id)) {
+          next.delete(job.id);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [jobsQuery.data, tiktokStatusResults]);
+
+  useEffect(() => {
+    if (!autoPollingTikTokJobs.size) return;
+    const intervalId = window.setInterval(() => {
+      for (const jobId of Array.from(autoPollingTikTokJobs)) {
+        checkTikTokStatus(jobId, { silent: true });
+      }
+    }, 10_000);
+    return () => window.clearInterval(intervalId);
+  }, [autoPollingTikTokJobs]);
 
   const copyShareLink = async (token: string) => {
     const url = `${window.location.origin}/s/${token}`;
@@ -725,7 +809,13 @@ export function JobsList() {
         const liveTikTokStatus = tiktokStatusResults[job.id];
         const displayedTikTokStatus = liveTikTokStatus?.status || job.tiktokPublishStatus || (job.tiktokPublishId ? "PROCESSING" : null);
         const displayedTikTokError = liveTikTokStatus?.failReason || liveTikTokStatus?.error || job.tiktokPublishError;
-        const displayedTikTokRaw = liveTikTokStatus?.statusResponse || liveTikTokStatus?.raw || job.tiktokStatusResponse || job.tiktokInitResponse;
+        const displayedTikTokStatusResponse = liveTikTokStatus?.statusResponse || job.tiktokStatusResponse || null;
+        const displayedTikTokRaw = displayedTikTokStatusResponse || liveTikTokStatus?.raw || job.tiktokInitResponse;
+        const rawStatusPayload = displayedTikTokStatusResponse as any;
+        const rawStatusValue = rawStatusPayload?.data?.status || liveTikTokStatus?.tiktokStatus || displayedTikTokStatus || "UNKNOWN";
+        const rawFailReason = rawStatusPayload?.data?.fail_reason || liveTikTokStatus?.failReason || displayedTikTokError || null;
+        const isTikTokRawVisible = visibleTikTokRawJobs.has(job.id);
+        const isTikTokAutoPolling = autoPollingTikTokJobs.has(job.id) && Boolean(job.tiktokPublishId) && !TIKTOK_TERMINAL_STATUSES.has(displayedTikTokStatus || "");
 
         return (
           <Card key={job.id}>
@@ -1053,20 +1143,34 @@ export function JobsList() {
                         </Badge>
                       )}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => checkTikTokStatusMutation.mutate(job.id)}
-                      disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
-                      data-testid={`button-tiktok-status-panel-${job.id}`}
-                      className="max-sm:w-full"
-                    >
-                      {checkTikTokStatusMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Clock className="w-3.5 h-3.5 mr-1" />}
-                      Check TikTok Status
-                    </Button>
+                    <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => checkTikTokStatusMutation.mutate(job.id)}
+                        disabled={!job.tiktokPublishId || checkTikTokStatusMutation.isPending}
+                        data-testid={`button-tiktok-status-panel-${job.id}`}
+                        className="max-sm:w-full"
+                      >
+                        {checkTikTokStatusMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Clock className="w-3.5 h-3.5 mr-1" />}
+                        Check TikTok Status
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => toggleTikTokRaw(job.id)}
+                        data-testid={`button-tiktok-raw-json-${job.id}`}
+                        className="max-sm:w-full"
+                      >
+                        <FileText className="w-3.5 h-3.5 mr-1" />
+                        {isTikTokRawVisible ? "Hide Raw JSON" : "Show Raw JSON"}
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                     <div className="break-all"><span className="font-medium text-foreground">publish_id:</span> {liveTikTokStatus?.publishId || job.tiktokPublishId || "none"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">status API:</span> {rawStatusValue}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">fail_reason:</span> {rawFailReason || "none"}</div>
                     <div className="break-all"><span className="font-medium text-foreground">mode:</span> {job.tiktokPostMode || "DIRECT_POST_VIDEO_PUBLISH_FILE_UPLOAD"}</div>
                     <div className="break-all"><span className="font-medium text-foreground">scope:</span> video.publish direct post</div>
                     <div className="break-all"><span className="font-medium text-foreground">privacy:</span> {job.tiktokPrivacyLevel || "SELF_ONLY"}</div>
@@ -1074,19 +1178,30 @@ export function JobsList() {
                     <div className="break-all"><span className="font-medium text-foreground">username:</span> {job.tiktokCreatorUsername || tiktokStatusQuery.data?.creatorUsername || "unknown"}</div>
                     <div className="break-all"><span className="font-medium text-foreground">open_id:</span> {liveTikTokStatus?.openId || job.tiktokOpenId || tiktokStatusQuery.data?.openId || "unknown"}</div>
                     <div className="break-all"><span className="font-medium text-foreground">token fingerprint:</span> {liveTikTokStatus?.accessTokenFingerprint || job.tiktokAccessTokenFingerprint || tiktokStatusQuery.data?.accessTokenFingerprint || "unknown"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">auto polling:</span> {isTikTokAutoPolling ? "every 10s" : "stopped"}</div>
+                    <div className="break-all"><span className="font-medium text-foreground">last checked:</span> {liveTikTokStatus?.checkedAt ? new Date(liveTikTokStatus.checkedAt).toLocaleTimeString() : "not yet"}</div>
                   </div>
                   {displayedTikTokError && (
                     <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
                       {displayedTikTokError}
                     </div>
                   )}
-                  {displayedTikTokRaw && (
-                    <details className="rounded-md border bg-background/60 p-2 text-xs">
-                      <summary className="cursor-pointer font-medium">Raw TikTok response</summary>
-                      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
-                        {JSON.stringify(displayedTikTokRaw, null, 2)}
+                  {isTikTokRawVisible && (
+                    <div className="rounded-md border bg-background/60 p-2 text-xs">
+                      <div className="font-medium">Raw TikTok Publish Status API response</div>
+                      {!displayedTikTokStatusResponse && (
+                        <div className="mt-1 text-muted-foreground">
+                          No status API response yet. Buzzly will auto-check every 10 seconds while this publish is processing.
+                        </div>
+                      )}
+                      <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(displayedTikTokStatusResponse || displayedTikTokRaw || {
+                          message: "No TikTok status response captured yet.",
+                          publish_id: liveTikTokStatus?.publishId || job.tiktokPublishId || null,
+                          current_status: displayedTikTokStatus,
+                        }, null, 2)}
                       </pre>
-                    </details>
+                    </div>
                   )}
                 </div>
               )}

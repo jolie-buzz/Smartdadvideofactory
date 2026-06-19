@@ -7,6 +7,7 @@ import { LogIn, UserPlus, Clock, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
 
 type TikTokAuthConfig = {
   configured: boolean;
@@ -15,6 +16,7 @@ type TikTokAuthConfig = {
 };
 
 export default function AuthPage() {
+  const [, setLocation] = useLocation();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [registered, setRegistered] = useState(false);
   const { login, register } = useAuth();
@@ -32,6 +34,7 @@ export default function AuthPage() {
     e.preventDefault();
     try {
       await login.mutateAsync({ username, password });
+      setLocation("/app");
     } catch (err: any) {
       toast({
         title: "Login failed",
@@ -231,6 +234,9 @@ export default function AuthPage() {
             </form>
           )}
         </CardContent>
+        <div className="border-t px-6 py-4 text-center text-xs text-muted-foreground">
+          <Link href="/" className="hover:text-foreground hover:underline">Back to Buzzly home</Link>
+        </div>
       </Card>
     </div>
   );

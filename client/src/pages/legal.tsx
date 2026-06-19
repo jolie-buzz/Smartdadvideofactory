@@ -5,7 +5,7 @@ type LegalPageProps = {
 };
 
 const lastUpdated = "June 15, 2026";
-const supportEmail = "support@buzzly.app";
+const supportEmail = "brandbuzzerph@gmail.com";
 
 function LegalShell({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
   return (

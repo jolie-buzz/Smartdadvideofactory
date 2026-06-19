@@ -219,7 +219,7 @@ export default function AdminPage() {
               Manage users and accounts
             </p>
           </div>
-          <Link href="/">
+          <Link href="/app">
             <Button variant="outline" className="gap-2" data-testid="link-back-home">
               <ArrowLeft className="w-4 h-4" />
               Back to App

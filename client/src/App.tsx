@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Redirect, Switch, Route } from "wouter";
 import { hydrateCachedApiQueries, queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,6 +8,7 @@ import Home from "@/pages/home";
 import AdminPage from "@/pages/admin";
 import AuthPage from "@/pages/auth";
 import LegalPage from "@/pages/legal";
+import LandingPage from "@/pages/landing";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Clock, ShieldX, Loader2 } from "lucide-react";
@@ -17,74 +18,75 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 hydrateCachedApiQueries();
 
-function AuthenticatedApp() {
-  const { user, isLoading, logout } = useAuth();
+function AuthLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthPage />;
-  }
-
-  if (user.status === "pending") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-md bg-primary/10">
-                <Clock className="w-6 h-6 text-primary" />
-              </div>
-              <h2 className="text-xl font-semibold" data-testid="text-pending-status">Account Pending Approval</h2>
-              <p className="text-muted-foreground" data-testid="text-pending-description">
-                Your account is awaiting admin approval. Please check back later.
-              </p>
-              <Button variant="outline" onClick={() => logout.mutate()} data-testid="button-pending-logout">
-                Sign Out
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (user.status === "restricted") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-md bg-destructive/10">
-                <ShieldX className="w-6 h-6 text-destructive" />
-              </div>
-              <h2 className="text-xl font-semibold" data-testid="text-restricted-status">Account Restricted</h2>
-              <p className="text-muted-foreground" data-testid="text-restricted-description">
-                Your account has been restricted. Please contact an administrator.
-              </p>
-              <Button variant="outline" onClick={() => logout.mutate()} data-testid="button-restricted-logout">
-                Sign Out
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+function AccountStatusPage({ status, onLogout }: { status: "pending" | "restricted"; onLogout: () => void }) {
+  const isPending = status === "pending";
 
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/admin" component={AdminPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md">
+        <CardContent className="pt-6">
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className={`flex items-center justify-center w-12 h-12 rounded-md ${isPending ? "bg-primary/10" : "bg-destructive/10"}`}>
+              {isPending
+                ? <Clock className="w-6 h-6 text-primary" />
+                : <ShieldX className="w-6 h-6 text-destructive" />}
+            </div>
+            <h2
+              className="text-xl font-semibold"
+              data-testid={isPending ? "text-pending-status" : "text-restricted-status"}
+            >
+              {isPending ? "Account Pending Approval" : "Account Restricted"}
+            </h2>
+            <p
+              className="text-muted-foreground"
+              data-testid={isPending ? "text-pending-description" : "text-restricted-description"}
+            >
+              {isPending
+                ? "Your account is awaiting admin approval. Please check back later."
+                : "Your account has been restricted. Please contact an administrator."}
+            </p>
+            <Button
+              variant="outline"
+              onClick={onLogout}
+              data-testid={isPending ? "button-pending-logout" : "button-restricted-logout"}
+            >
+              Sign Out
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
+}
+
+function LoginRoute() {
+  const { user, isLoading, logout } = useAuth();
+
+  if (isLoading) return <AuthLoading />;
+  if (!user) return <AuthPage />;
+  if (user.status === "pending" || user.status === "restricted") {
+    return <AccountStatusPage status={user.status} onLogout={() => logout.mutate()} />;
+  }
+  return <Redirect to="/app" />;
+}
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { user, isLoading, logout } = useAuth();
+
+  if (isLoading) return <AuthLoading />;
+  if (!user) return <Redirect to="/login" />;
+  if (user.status === "pending" || user.status === "restricted") {
+    return <AccountStatusPage status={user.status} onLogout={() => logout.mutate()} />;
+  }
+  return <>{children}</>;
 }
 
 function App() {
@@ -94,15 +96,21 @@ function App() {
         <Toaster />
         <AppErrorBoundary>
           <Switch>
+            <Route path="/" component={LandingPage} />
+            <Route path="/login" component={LoginRoute} />
             <Route path="/terms">
               <LegalPage type="terms" />
             </Route>
             <Route path="/privacy">
               <LegalPage type="privacy" />
             </Route>
-            <Route>
-              <AuthenticatedApp />
+            <Route path="/app">
+              <ProtectedRoute><Home /></ProtectedRoute>
             </Route>
+            <Route path="/admin">
+              <ProtectedRoute><AdminPage /></ProtectedRoute>
+            </Route>
+            <Route component={NotFound} />
           </Switch>
         </AppErrorBoundary>
         <PwaInstallPrompt />

@@ -687,24 +687,25 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/tiktok/callback", async (req, res) => {
+    const oauthMode = ((req.session as any).tiktokOAuthMode || "connect") as "connect" | "login";
+    const oauthReturnPath = oauthMode === "login" ? "/login" : "/app";
     try {
       const expectedState = (req.session as any).tiktokOAuthState;
-      const oauthMode = ((req.session as any).tiktokOAuthMode || "connect") as "connect" | "login";
       const state = routeParam(req.query.state as any);
       if (!expectedState || !state || expectedState !== state) {
-        return res.redirect("/?tiktok=state_error");
+        return res.redirect(`${oauthReturnPath}?tiktok=state_error`);
       }
       delete (req.session as any).tiktokOAuthState;
       delete (req.session as any).tiktokOAuthMode;
 
       const error = routeParam(req.query.error as any);
       if (error) {
-        return res.redirect(`/?tiktok=error&reason=${encodeURIComponent(error)}`);
+        return res.redirect(`${oauthReturnPath}?tiktok=error&reason=${encodeURIComponent(error)}`);
       }
 
       const code = routeParam(req.query.code as any);
       if (!code) {
-        return res.redirect("/?tiktok=missing_code");
+        return res.redirect(`${oauthReturnPath}?tiktok=missing_code`);
       }
 
       const { clientKey, clientSecret } = requireTikTokConfig();
@@ -731,26 +732,26 @@ export async function registerRoutes(
         }, (loginErr) => {
           if (loginErr) {
             console.error("[tiktok] Login session failed:", loginErr);
-            return res.redirect("/?tiktok=login_failed");
+            return res.redirect("/login?tiktok=login_failed");
           }
-          res.redirect("/?tiktok=logged_in");
+          res.redirect("/app?tiktok=logged_in");
         });
       }
 
       if (!req.isAuthenticated()) {
-        return res.redirect("/?tiktok=login_required");
+        return res.redirect("/login?tiktok=login_required");
       }
 
       const linkedConnection = await getTikTokConnectionByOpenId(token.open_id);
       if (linkedConnection && linkedConnection.userId !== req.user!.id) {
-        return res.redirect("/?tiktok=already_linked");
+        return res.redirect("/app?tiktok=already_linked");
       }
 
       await saveTikTokConnection(req.user!.id, token);
-      res.redirect("/?tiktok=connected");
+      res.redirect("/app?tiktok=connected");
     } catch (err: any) {
       console.error("[tiktok] OAuth callback failed:", err);
-      res.redirect(`/?tiktok=error&reason=${encodeURIComponent(err.message || "callback_failed")}`);
+      res.redirect(`${oauthReturnPath}?tiktok=error&reason=${encodeURIComponent(err.message || "callback_failed")}`);
     }
   });
 

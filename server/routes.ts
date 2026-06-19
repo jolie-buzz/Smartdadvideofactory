@@ -207,7 +207,7 @@ const createTikTokUser = async (openId: string) => {
     username,
     password,
     role: "user",
-    status: "approved",
+    status: "pending",
   });
 };
 

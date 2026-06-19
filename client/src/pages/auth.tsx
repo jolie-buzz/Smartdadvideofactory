@@ -17,7 +17,10 @@ type TikTokAuthConfig = {
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(() => {
+    if (typeof window === "undefined") return "login";
+    return new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "login";
+  });
   const [registered, setRegistered] = useState(false);
   const { login, register } = useAuth();
   const { toast } = useToast();

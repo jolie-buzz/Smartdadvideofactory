@@ -222,7 +222,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
       data,
     }: {
       id: number;
-      data: Partial<Pick<Asset, "voiceId" | "voiceName" | "musicKey" | "personaPrompt" | "scriptPromptId" | "scriptDurationSec">>;
+      data: Partial<Pick<Asset, "voiceoverEnabled" | "voiceId" | "voiceName" | "musicKey" | "personaPrompt" | "scriptPromptId" | "scriptDurationSec">>;
     }) => {
       const res = await apiRequest("PATCH", `/api/assets/${id}`, data);
       return res.json();
@@ -687,7 +687,7 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   >
                     <Mic className="mb-0.5 h-3.5 w-3.5" />
                     <span className="block truncate text-[10px] text-muted-foreground">Voice</span>
-                    <span className="block truncate text-[11px]">{asset.voiceName || "None"}</span>
+                    <span className="block truncate text-[11px]">{asset.voiceoverEnabled === false ? "Off" : asset.voiceName || "None"}</span>
                   </button>
                   <button
                     type="button"
@@ -766,12 +766,13 @@ export function SetupsList({ onActivate, onEdit, onOpenStudio }: SetupsListProps
                   <div className="min-w-0 space-y-1">
                     <p className="text-[11px] text-muted-foreground">Voice</p>
                     <Select
-                      value={asset.voiceId || "none"}
+                      value={asset.voiceoverEnabled === false ? "none" : asset.voiceId || "none"}
                       onValueChange={(value) => {
                         const voice = voicesQuery.data?.find((item) => item.voice_id === value);
                         quickUpdateMutation.mutate({
                           id: asset.id,
                           data: {
+                            voiceoverEnabled: value !== "none",
                             voiceId: value === "none" ? null : value,
                             voiceName: value === "none" ? null : voice?.name || "",
                           },

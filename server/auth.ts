@@ -206,6 +206,9 @@ async function seedAdmin() {
     await db.execute(
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS script_duration_sec INTEGER NOT NULL DEFAULT 60` as any
     );
+    await db.execute(
+      `ALTER TABLE assets ADD COLUMN IF NOT EXISTS voiceover_enabled BOOLEAN NOT NULL DEFAULT TRUE` as any
+    );
     await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_id TEXT` as any);
     await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_status TEXT` as any);
     await db.execute(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tiktok_publish_error TEXT` as any);

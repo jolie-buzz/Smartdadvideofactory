@@ -876,7 +876,7 @@ export async function registerRoutes(
 
   app.post("/api/setup", requireAuth, async (req, res) => {
     try {
-      const { name, photoKey, videoKey, personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
+      const { name, photoKey, videoKey, personaPrompt, scriptPromptId, scriptDurationSec, voiceoverEnabled, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, timelineJson } = req.body;
 
       if (!photoKey) {
         return res.status(400).json({ error: "photoKey is required. Upload photo first." });
@@ -889,6 +889,7 @@ export async function registerRoutes(
         scriptPromptId: scriptPromptId ? parseInt(String(scriptPromptId)) : null,
         personaPrompt: personaPrompt || "",
         scriptDurationSec: normalizeScriptDurationSec(scriptDurationSec ?? await storage.getScriptDurationSec(req.user!.id)),
+        voiceoverEnabled: voiceoverEnabled !== false,
         voiceId: voiceId || null,
         voiceName: voiceName || null,
         openaiModel: openaiModel || "gpt-4o",
@@ -993,6 +994,7 @@ export async function registerRoutes(
           videoSource: "builder",
           isFavorite: false,
           personaPrompt: ADMIN_MUSIC_LIBRARY_PROMPT,
+          voiceoverEnabled: false,
           voiceId: null,
           voiceName: null,
           openaiModel: "gpt-4.1",
@@ -1125,12 +1127,13 @@ export async function registerRoutes(
       const asset = await storage.getAsset(id);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      const { name, personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
+      const { name, personaPrompt, scriptPromptId, scriptDurationSec, voiceoverEnabled, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance, thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan, musicKey, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt, hookModel, captionEnabled, captionPrompt, captionModel, seoEnabled, seoPrompt, seoModel, videoSource, videoKey, photoKey, isFavorite, timelineJson } = req.body;
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (personaPrompt !== undefined) updateData.personaPrompt = personaPrompt;
       if (scriptPromptId !== undefined) updateData.scriptPromptId = scriptPromptId ? parseInt(String(scriptPromptId)) : null;
       if (scriptDurationSec !== undefined) updateData.scriptDurationSec = normalizeScriptDurationSec(scriptDurationSec);
+      if (voiceoverEnabled !== undefined) updateData.voiceoverEnabled = Boolean(voiceoverEnabled);
       if (videoSource !== undefined) updateData.videoSource = "builder";
       if (videoKey !== undefined) updateData.videoKey = videoKey;
       if (isFavorite !== undefined) updateData.isFavorite = Boolean(isFavorite);
@@ -1185,6 +1188,7 @@ export async function registerRoutes(
         scriptPromptId: asset.scriptPromptId,
         personaPrompt: asset.personaPrompt,
         scriptDurationSec: normalizeScriptDurationSec(asset.scriptDurationSec),
+        voiceoverEnabled: asset.voiceoverEnabled,
         voiceId: asset.voiceId,
         voiceName: asset.voiceName,
         openaiModel: asset.openaiModel,
@@ -1690,7 +1694,7 @@ export async function registerRoutes(
       const asset = await storage.getAsset(assetId);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
 
-      if (!asset.voiceId) {
+      if (asset.voiceoverEnabled && !asset.voiceId) {
         return res.status(400).json({ error: "No voice selected for this setup. Please edit the setup first." });
       }
 
@@ -2589,7 +2593,7 @@ export async function registerRoutes(
 
       const asset = await storage.getAsset(variant.assetId);
       if (!asset) return res.status(404).json({ error: "Asset not found" });
-      if (!asset.voiceId) return res.status(400).json({ error: "No voice selected for this setup. Edit the setup first." });
+      if (asset.voiceoverEnabled && !asset.voiceId) return res.status(400).json({ error: "No voice selected for this setup. Edit the setup first." });
 
       await storage.updateAsset(variant.assetId, { videoKey: variant.r2Key });
 

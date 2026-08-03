@@ -32,6 +32,7 @@ export const assets = pgTable("assets", {
   scriptPromptId: integer("script_prompt_id").references(() => scriptPrompts.id),
   personaPrompt: text("persona_prompt").notNull(),
   scriptDurationSec: integer("script_duration_sec").notNull().default(60),
+  voiceoverEnabled: boolean("voiceover_enabled").notNull().default(true),
   voiceId: text("voice_id"),
   voiceName: text("voice_name"),
   openaiModel: text("openai_model").notNull().default("gpt-4.1"),

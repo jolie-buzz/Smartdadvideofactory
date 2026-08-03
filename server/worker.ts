@@ -757,38 +757,40 @@ async function processJob(jobId: number): Promise<void> {
     await storage.updateJob(jobId, { scriptText });
     await storage.appendJobLog(jobId, `Script generated (${scriptText.split("\n").length} lines)`);
 
-    if (!asset.voiceId) throw new Error("No voice selected for this asset setup");
+    const voiceoverEnabled = asset.voiceoverEnabled !== false;
+    if (voiceoverEnabled && !asset.voiceId) throw new Error("No voice selected for this asset setup");
 
-    // ── Step 2: Parallel — voice generation + presigned URLs ────────────────
+    // ── Step 2: Optional voice generation + presigned URLs ──────────────────
     await assertJobNotStopped(jobId);
     await storage.updateJob(jobId, { status: "generating_audio" });
-    await storage.appendJobLog(jobId, `Generating voice (ElevenLabs) + fetching R2 URLs in parallel...`);
+    await storage.appendJobLog(jobId, voiceoverEnabled
+      ? "Generating voice (ElevenLabs) + fetching media URLs in parallel..."
+      : "Voice-over disabled. Fetching media URLs for a music-only/silent render...");
 
     const videoUrlPromise = getSignedDownloadUrl(asset.videoKey);
     const musicUrlPromise = getMusicInput(asset.musicKey);
-    let shouldMixVoice = true;
-    let audioRawBuffer: Buffer;
-    try {
-      audioRawBuffer = await generateVoice(scriptText, asset.voiceId, asset.elevenlabsModel, asset.useEnhance);
-    } catch (err) {
-      if (!shouldFallbackFromTtsError(err)) throw err;
-      shouldMixVoice = false;
-      await storage.appendJobLog(jobId, "ElevenLabs free-tier access is blocked for unusual activity. Continuing without AI voiceover for this render.");
-      audioRawBuffer = await createSilentAudioBuffer(workDir);
+    let shouldMixVoice = voiceoverEnabled;
+    let audioRawBuffer: Buffer | null = null;
+    if (voiceoverEnabled) {
+      try {
+        audioRawBuffer = await generateVoice(scriptText, asset.voiceId!, asset.elevenlabsModel, asset.useEnhance);
+      } catch (err) {
+        if (!shouldFallbackFromTtsError(err)) throw err;
+        shouldMixVoice = false;
+        await storage.appendJobLog(jobId, "ElevenLabs free-tier access is blocked for unusual activity. Continuing without AI voice-over for this render.");
+      }
     }
 
     const [videoUrl, musicUrl] = await Promise.all([videoUrlPromise, musicUrlPromise]);
     await assertJobNotStopped(jobId);
 
-    await storage.appendJobLog(jobId, shouldMixVoice
-      ? `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Starting FFmpeg + R2 upload in parallel...`
-      : `Voice fallback ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB silent placeholder). Starting FFmpeg + R2 upload in parallel...`);
+    if (shouldMixVoice && audioRawBuffer) {
+      await storage.appendJobLog(jobId, `Voice ready (${(audioRawBuffer.length / 1024).toFixed(1)} KB). Preparing final render...`);
+    }
 
     const voiceRawPath = join(workDir, "voice_raw.mp3");
-    await writeFile(voiceRawPath, audioRawBuffer);
-
-    const audioRawKey = `jobs/${jobId}/voice_raw.mp3`;
-    const audioCleanKey = `jobs/${jobId}/voice_clean.mp3`;
+    const audioRawKey = shouldMixVoice ? `jobs/${jobId}/voice_raw.mp3` : null;
+    const audioCleanKey = shouldMixVoice ? `jobs/${jobId}/voice_clean.mp3` : null;
     const voiceCleanPath = join(workDir, "voice_clean.mp3");
 
     const combineSettings = {
@@ -798,37 +800,42 @@ async function processJob(jobId: number): Promise<void> {
       voiceVolume: asset.voiceVolume,
       musicVolume: asset.musicVolume,
     };
-    let audioCleanBuffer = audioRawBuffer;
-    let voiceDurationSec = 1;
-    if (shouldMixVoice) {
+    let audioCleanBuffer: Buffer | null = audioRawBuffer;
+    let targetDurationSec: number;
+    if (shouldMixVoice && audioRawBuffer) {
+      await writeFile(voiceRawPath, audioRawBuffer);
       try {
         await storage.appendJobLog(jobId, "Cleaning voiceover and measuring exact narration duration...");
         await cleanVoiceoverFile(voiceRawPath, voiceCleanPath, combineSettings);
         audioCleanBuffer = await readFile(voiceCleanPath);
-        voiceDurationSec = await probeMediaDurationSeconds(voiceCleanPath);
+        targetDurationSec = await probeMediaDurationSeconds(voiceCleanPath);
       } catch (err: any) {
         await storage.appendJobLog(jobId, `Warning: Voice cleanup failed (${err.message}). Using raw voiceover duration.`);
         audioCleanBuffer = audioRawBuffer;
         await writeFile(voiceCleanPath, audioCleanBuffer);
-        voiceDurationSec = await probeMediaDurationSeconds(voiceRawPath);
+        targetDurationSec = await probeMediaDurationSeconds(voiceRawPath);
       }
+      targetDurationSec = Math.max(0.1, Number(targetDurationSec.toFixed(3)));
+      await storage.appendJobLog(jobId, `Voice-over duration locked at ${targetDurationSec}s. Video, music, and captions will trim to this exact length.`);
     } else {
-      await writeFile(voiceCleanPath, audioCleanBuffer);
-      voiceDurationSec = await probeMediaDurationSeconds(voiceRawPath).catch(() => 1);
+      targetDurationSec = await probeMediaDurationSeconds(videoUrl)
+        .catch(() => normalizeScriptDurationSec(asset.scriptDurationSec));
+      targetDurationSec = Math.max(0.1, Number(targetDurationSec.toFixed(3)));
+      await storage.appendJobLog(jobId, `No voice-over mode: keeping the source video duration (${targetDurationSec}s).`);
     }
-    voiceDurationSec = Math.max(0.1, Number(voiceDurationSec.toFixed(3)));
-    await storage.appendJobLog(jobId, `Voiceover duration locked at ${voiceDurationSec}s. Video, music, and captions will trim to this exact length.`);
 
-    // ── Step 3: Parallel — upload audio + run combined FFmpeg pass ───────────
+    // ── Step 3: Upload optional audio + run combined FFmpeg pass ─────────────
     await assertJobNotStopped(jobId);
     await storage.updateJob(jobId, { status: "rendering" });
-    await storage.appendJobLog(jobId, `Rendering final video to match voiceover duration exactly...`);
+    await storage.appendJobLog(jobId, shouldMixVoice
+      ? "Rendering final video to match voice-over duration exactly..."
+      : `Rendering final video without voice-over${musicUrl ? " (music only)" : " (silent)"}...`);
 
     const finalPath = join(workDir, "final.mp4");
     const finalCombineSettings = {
       voiceVolume: combineSettings.voiceVolume,
       musicVolume: combineSettings.musicVolume,
-      targetDurationSec: voiceDurationSec,
+      targetDurationSec,
     };
     const renderFinalVideo = async () => {
       try {
@@ -851,20 +858,25 @@ async function processJob(jobId: number): Promise<void> {
     };
 
     logMemory("worker: before audio upload/render", { jobId });
-    await Promise.all([
-      uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
-      uploadToR2(audioCleanKey, audioCleanBuffer, "audio/mpeg"),
-      renderFinalVideo(),
-    ]);
+    const renderTasks: Promise<unknown>[] = [renderFinalVideo()];
+    if (audioRawKey && audioCleanKey && audioRawBuffer && audioCleanBuffer) {
+      renderTasks.push(
+        uploadToR2(audioRawKey, audioRawBuffer, "audio/mpeg"),
+        uploadToR2(audioCleanKey, audioCleanBuffer, "audio/mpeg"),
+      );
+    }
+    await Promise.all(renderTasks);
     await assertJobNotStopped(jobId);
     logMemory("worker: after audio upload/render", { jobId });
 
     await storage.updateJob(jobId, { audioRawKey, audioCleanKey });
-    await storage.appendJobLog(jobId, "FFmpeg pass complete at exact voiceover length.");
+    await storage.appendJobLog(jobId, shouldMixVoice
+      ? "FFmpeg pass complete at exact voice-over length."
+      : "FFmpeg pass complete without voice-over.");
 
     // ── Step 4: Auto-captions (optional) ────────────────────────────────────
     let outputPath = finalPath;
-    if (asset.autoCaptions) {
+    if (asset.autoCaptions && shouldMixVoice && audioCleanBuffer) {
       await assertJobNotStopped(jobId);
       await storage.appendJobLog(jobId, "Generating captions via AI transcription...");
       try {
@@ -879,6 +891,8 @@ async function processJob(jobId: number): Promise<void> {
       } catch (err: any) {
         await storage.appendJobLog(jobId, `Warning: Caption generation failed: ${err.message}. Continuing without captions.`);
       }
+    } else if (asset.autoCaptions && !shouldMixVoice) {
+      await storage.appendJobLog(jobId, "Auto-captions skipped because this render has no voice-over to transcribe.");
     }
 
     // ── Step 5: Parallel AI text outputs ────────────────────────────────────

@@ -266,6 +266,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   const [scriptDurationSec, setScriptDurationSec] = useState(60);
   const [photo, setPhoto] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
+  const [voiceoverEnabled, setVoiceoverEnabled] = useState(true);
   const [voiceId, setVoiceId] = useState("");
   const [voiceName, setVoiceName] = useState("");
   const [voiceSearch, setVoiceSearch] = useState("");
@@ -373,6 +374,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
       setPersonaPrompt(editingAsset.personaPrompt);
       setScriptPromptId(editingAsset.scriptPromptId || null);
       setScriptDurationSec(normalizeDuration(editingAsset.scriptDurationSec));
+      setVoiceoverEnabled(editingAsset.voiceoverEnabled !== false);
       setVoiceId(editingAsset.voiceId || "");
       setVoiceName(editingAsset.voiceName || "");
       setOpenaiModel(editingAsset.openaiModel || "gpt-4.1");
@@ -687,7 +689,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name, videoSource: "builder", personaPrompt, scriptPromptId, scriptDurationSec, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+            name, videoSource: "builder", personaPrompt, scriptPromptId, scriptDurationSec, voiceoverEnabled, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
             thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
             musicKey: selectedMusicKey || null, voiceVolume, musicVolume, autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
             captionEnabled, captionPrompt: captionPrompt || null, captionModel,
@@ -781,7 +783,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           name, photoKey: photoResult.key, videoKey: "",
           scriptPromptId,
           scriptDurationSec,
-          videoSource: "builder", personaPrompt, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
+          videoSource: "builder", personaPrompt, voiceoverEnabled, voiceId, voiceName, openaiModel, elevenlabsModel, useEnhance,
           thresholdDb, removeSilencesLongerThan, ignoreDetectionsShorterThan,
           musicKey: musicKeyValue, voiceVolume, musicVolume,
           autoCaptions, hookHeadline, hookPrompt: hookPrompt || null, hookModel,
@@ -1018,15 +1020,15 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
   };
 
   const canSave = isEditing
-    ? name && personaPrompt && voiceId
-    : name && personaPrompt && photo && (pendingShots.length > 0 || studioVideoFiles.length > 0) && voiceId;
+    ? name && personaPrompt && (!voiceoverEnabled || voiceId)
+    : name && personaPrompt && photo && (pendingShots.length > 0 || studioVideoFiles.length > 0) && (!voiceoverEnabled || voiceId);
 
   const missingFields = [];
   if (!name) missingFields.push("Setup Name");
   if (!isEditing && !photo) missingFields.push("Product Photo");
   if (!isEditing && pendingShots.length === 0 && studioVideoFiles.length === 0) missingFields.push("At least 1 Studio clip");
   if (!personaPrompt) missingFields.push("Persona Prompt");
-  if (!voiceId) missingFields.push("Voice");
+  if (voiceoverEnabled && !voiceId) missingFields.push("Voice");
 
   const videoSizeMB = video ? video.size / 1024 / 1024 : 0;
   const isLargeFile = videoSizeMB > 50;
@@ -1588,8 +1590,26 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
           <div className="space-y-4">
             <h3 className="text-sm font-medium flex items-center gap-2">
               <Mic className="w-4 h-4" />
-              Voice Selection
+              Voice-over
             </h3>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5 pr-4">
+                <Label htmlFor="voiceover-toggle" className="text-sm font-medium">Add AI voice-over</Label>
+                <p className="text-xs text-muted-foreground">
+                  Turn this off to render with music only, or as a silent video when no music is selected.
+                </p>
+              </div>
+              <Switch
+                id="voiceover-toggle"
+                data-testid="switch-voiceover-enabled"
+                checked={voiceoverEnabled}
+                onCheckedChange={(enabled) => {
+                  setVoiceoverEnabled(enabled);
+                  if (!enabled) setAutoCaptions(false);
+                }}
+                disabled={isUploading}
+              />
+            </div>
             <div className="space-y-3">
               <div className="flex gap-2 items-end">
                 <div className="flex-1 space-y-2">
@@ -1599,7 +1619,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                     value={voiceSearch}
                     onChange={(event) => setVoiceSearch(event.target.value)}
                     placeholder={voicesQuery.isLoading ? "Loading voices..." : "Search voice name..."}
-                    disabled={isUploading || voicesQuery.isLoading || !voicesQuery.data?.length}
+                    disabled={!voiceoverEnabled || isUploading || voicesQuery.isLoading || !voicesQuery.data?.length}
                     data-testid="input-voice-search"
                   />
                 </div>
@@ -1607,7 +1627,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                   type="button"
                   variant="secondary"
                   onClick={() => voicesQuery.refetch()}
-                  disabled={isUploading || voicesQuery.isFetching}
+                  disabled={!voiceoverEnabled || isUploading || voicesQuery.isFetching}
                   data-testid="button-load-voices"
                   size="icon"
                   title="Refresh voices"
@@ -1646,7 +1666,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                         type="button"
                         className="min-w-0 flex-1 text-left"
                         onClick={() => handleVoiceSelect(voice.voice_id)}
-                        disabled={isUploading}
+                        disabled={!voiceoverEnabled || isUploading}
                         data-testid="button-select-voice"
                       >
                         <p className="truncate text-sm font-medium">{voice.name}</p>
@@ -1658,7 +1678,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                         size="sm"
                         className="shrink-0 gap-2"
                         onClick={() => handlePreviewVoice(voice)}
-                        disabled={isUploading || (!voice.preview_url && !isPreviewing)}
+                        disabled={!voiceoverEnabled || isUploading || (!voice.preview_url && !isPreviewing)}
                         title={voice.preview_url ? "Preview voice" : "Preview not available"}
                         data-testid="button-preview-voice"
                       >
@@ -1682,7 +1702,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
               data-testid="switch-enhance"
               checked={useEnhance}
               onCheckedChange={setUseEnhance}
-              disabled={isUploading}
+              disabled={!voiceoverEnabled || isUploading}
             />
           </div>
 
@@ -1854,7 +1874,7 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
                 min={0}
                 max={1.5}
                 step={0.05}
-                disabled={isUploading}
+                disabled={!voiceoverEnabled || isUploading}
               />
             </div>
 
@@ -1886,14 +1906,18 @@ export function SetupForm({ onComplete, editingAsset, onCancelEdit, initialName,
             <div className="flex items-center justify-between py-2">
               <div className="space-y-0.5">
                 <Label htmlFor="autocaptions-toggle" className="text-sm font-medium">Auto Captions</Label>
-                <p className="text-xs text-muted-foreground">Automatically burn captions into the final video using AI transcription</p>
+                <p className="text-xs text-muted-foreground">
+                  {voiceoverEnabled
+                    ? "Automatically burn captions into the final video using AI transcription"
+                    : "Requires voice-over because captions are created from the narration"}
+                </p>
               </div>
               <Switch
                 id="autocaptions-toggle"
                 data-testid="switch-auto-captions"
                 checked={autoCaptions}
                 onCheckedChange={setAutoCaptions}
-                disabled={isUploading}
+                disabled={!voiceoverEnabled || isUploading}
               />
             </div>
 

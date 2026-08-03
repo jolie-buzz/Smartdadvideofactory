@@ -74,13 +74,13 @@ const workflow = [
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <span className="flex items-center gap-2.5">
+    <span className="flex min-w-0 items-center gap-2 sm:gap-2.5">
       <img
         src="/buzzly-logo.png"
         alt=""
-        className={`${compact ? "h-8 w-8" : "h-10 w-10"} object-contain drop-shadow-[0_0_1px_rgba(255,255,255,0.8)]`}
+        className={`${compact ? "h-8 w-8" : "h-8 w-8 sm:h-10 sm:w-10"} shrink-0 object-contain drop-shadow-[0_0_1px_rgba(255,255,255,0.8)]`}
       />
-      <span className={`${compact ? "text-lg" : "text-xl"} font-extrabold tracking-[-0.03em]`}>Buzzly</span>
+      <span className={`${compact ? "text-lg" : "text-lg sm:text-xl"} whitespace-nowrap font-extrabold tracking-[-0.03em]`}>Buzzly</span>
     </span>
   );
 }
@@ -91,9 +91,9 @@ export default function LandingPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[850px] bg-[radial-gradient(circle_at_58%_20%,rgba(111,45,189,0.28),transparent_38%),radial-gradient(circle_at_75%_55%,rgba(31,104,191,0.18),transparent_32%)]" />
       <div className="pointer-events-none absolute left-[-160px] top-[380px] h-96 w-96 rounded-full bg-blue-500/10 blur-[100px]" />
 
-      <header className="relative z-30 border-b border-white/[0.07] bg-[#05060b]/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:h-20">
-          <Link href="/" aria-label="Buzzly home">
+      <header className="relative z-30 border-b border-white/[0.07] bg-[#05060b]/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:h-[72px] sm:px-8 lg:h-20">
+          <Link href="/" aria-label="Buzzly home" className="min-w-0 shrink">
             <Brand />
           </Link>
 
@@ -107,7 +107,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-2.5">
             <Link
               href="/login"
-              className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm font-semibold transition hover:border-white/25 hover:bg-white/10"
+              className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm font-semibold transition hover:border-white/25 hover:bg-white/10"
               data-testid="button-header-sign-in"
             >
               Sign In
